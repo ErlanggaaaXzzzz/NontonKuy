@@ -294,13 +294,20 @@ function collectMedia(payload) {
     return { direct, embeds, downloads: downloads.filter(d => d.url) };
 }
 
+const YOUTUBE_EMBED = /^https:\/\/(www\.)?youtube(-nocookie)?\.com\//i;
+const IFRAME_ALLOW = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen';
+
+function embedReferrerPolicy(url) {
+    return YOUTUBE_EMBED.test(url) ? 'strict-origin-when-cross-origin' : 'no-referrer';
+}
+
 function playerHtml(media, posterUrl) {
     const options = media.direct.map(m => ({ ...m, kind: 'video' })).concat(media.embeds.map(m => ({ ...m, kind: 'embed' })));
     if (options.length === 0) return '';
     const first = options[0];
     let html = first.kind === 'video'
         ? `<video id="detailPlayer" controls playsinline preload="metadata" referrerpolicy="no-referrer" ${posterUrl ? `poster="${escapeAttr(proxiedImage(posterUrl))}"` : ''} src="${escapeAttr(first.url)}"></video>`
-        : `<iframe id="detailEmbed" src="${escapeAttr(first.url)}" allowfullscreen referrerpolicy="no-referrer"></iframe>`;
+        : `<iframe id="detailEmbed" src="${escapeAttr(first.url)}" allow="${IFRAME_ALLOW}" allowfullscreen referrerpolicy="${embedReferrerPolicy(first.url)}"></iframe>`;
     if (options.length > 1) {
         html += `<div class="modal-links">${options.map(o => `<a href="#" data-kind="${o.kind}" data-src="${escapeAttr(o.url)}">${escapeHtml(o.label)}</a>`).join('')}</div>`;
     }
@@ -312,13 +319,14 @@ function swapPlayer(container, kind, src) {
     if (!holder) return;
     const element = document.createElement(kind === 'video' ? 'video' : 'iframe');
     element.id = kind === 'video' ? 'detailPlayer' : 'detailEmbed';
-    element.setAttribute('referrerpolicy', 'no-referrer');
+    element.setAttribute('referrerpolicy', kind === 'video' ? 'no-referrer' : embedReferrerPolicy(src));
     if (kind === 'video') {
         element.controls = true;
         element.setAttribute('playsinline', '');
         element.src = src;
     } else {
         element.setAttribute('allowfullscreen', '');
+        element.setAttribute('allow', IFRAME_ALLOW);
         element.src = src;
     }
     holder.replaceWith(element);
