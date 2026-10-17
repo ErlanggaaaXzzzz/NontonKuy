@@ -3,58 +3,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NontonKuy - By Zyrenn</title>
+    <meta name="theme-color" content="#1d3557">
+    <title>NontonKuy</title>
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
-    <nav class="navbar">
-        <div class="container">
-            <div class="nav-brand">
-                <span class="brand-icon">🎬</span>
-                <span class="brand-text">MediaHub</span>
-                <span class="brand-badge">v2.0</span>
-            </div>
-            <div class="nav-status">
-                <span class="status-dot"></span>
-                <span class="status-text">All Systems Online</span>
-            </div>
+    <header class="topbar">
+        <div class="topbar-inner">
+            <a class="brand" href="/">Nonton<b>Kuy</b></a>
+            <form class="search" id="searchForm" role="search" onsubmit="return false">
+                <input type="search" id="searchInput" placeholder="Cari judul anime atau video" autocomplete="off" enterkeyhint="search" aria-label="Cari judul">
+                <button type="button" id="searchBtn" aria-label="Cari">Cari</button>
+            </form>
         </div>
-    </nav>
+        <nav class="tabs" aria-label="Kategori">
+            <button class="tab-btn active" data-tab="all">Semua</button>
+            <button class="tab-btn" data-tab="youtube">Resmi</button>
+            <button class="tab-btn" data-tab="anilist">Katalog</button>
+            <button class="tab-btn" data-tab="anime">Anime</button>
+            <button class="tab-btn" data-tab="hentai">Hentai</button>
+            <button class="tab-btn" data-tab="videos">Video</button>
+            <button class="tab-btn" data-tab="otakudesu">OtakuDesu</button>
+            <button class="tab-btn" data-tab="anichin">Anichin</button>
+            <button class="tab-btn" data-tab="xanimu">XAnimu</button>
+        </nav>
+    </header>
 
-    <div class="container">
-        <header class="hero">
-            <h1>🎯 All Media in One Place</h1>
-            <p>Anime, Hentai, Videos & More — Instant Search & Play</p>
-            <div class="search-container">
-                <input type="text" id="searchInput" placeholder="Search anime, videos, or hentai..." />
-                <button id="searchBtn">🔍 Search</button>
-            </div>
-        </header>
+    <main class="page">
+        <h2 class="section-title" id="sectionTitle">Rilis terbaru</h2>
+        <div id="results" class="grid" aria-live="polite"></div>
+    </main>
 
-        <div class="category-tabs">
-            <button class="tab-btn active" data-tab="all">🔥 All</button>
-            <button class="tab-btn" data-tab="anime">🎌 Anime</button>
-            <button class="tab-btn" data-tab="hentai">🔞 Hentai</button>
-            <button class="tab-btn" data-tab="videos">🎥 Videos</button>
-            <button class="tab-btn" data-tab="otakudesu">📺 OtakuDesu</button>
-            <button class="tab-btn" data-tab="anichin">🎭 Anichin</button>
-            <button class="tab-btn" data-tab="xanimu">🎞️ XAnime</button>
-        </div>
-
-        <div id="results" class="results-grid"></div>
-
-        <div id="modal" class="modal">
-            <div class="modal-content">
-                <span class="modal-close">&times;</span>
-                <div id="modalBody"></div>
-            </div>
+    <div id="modal" class="modal" role="dialog" aria-modal="true">
+        <div class="sheet">
+            <button class="modal-close" aria-label="Tutup">&times;</button>
+            <div id="modalBody"></div>
         </div>
     </div>
 
-    <footer>
-        <p>Made with ❤️ | All APIs Integrated | Status: <span id="statusIndicator">Online</span></p>
-    </footer>
+    <footer class="foot"><a href="/subtitle.html">Terjemah subtitle</a><br>NontonKuy oleh Zyrenn</footer>
 
     <script src="script.js"></script>
 </body>

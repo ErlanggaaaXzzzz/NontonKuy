@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1d3557">
+    <title>Terjemah Subtitle | NontonKuy</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .panel { max-width: 720px; margin: 0 auto; }
+        .field { margin-bottom: 14px; }
+        .field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; }
+        .field input[type="text"], .field input[type="url"], .field select {
+            width: 100%;
+            padding: 9px 10px;
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            background: var(--card);
+            font-size: 14px;
+        }
+        .field input[type="file"] { width: 100%; font-size: 13px; }
+        .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0 12px; }
+        .btn { padding: 9px 16px; border-radius: 4px; background: var(--brand); color: #fff; font-size: 14px; }
+        .btn.alt { background: var(--hot); }
+        .btn:disabled { opacity: 0.55; cursor: default; }
+        .status { font-size: 13px; color: var(--muted); min-height: 20px; margin-bottom: 8px; }
+        .stage video { display: block; width: 100%; background: #000; border-radius: 4px; }
+        .hint { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <header class="topbar">
+        <div class="topbar-inner">
+            <a class="brand" href="/">Nonton<b>Kuy</b></a>
+        </div>
+    </header>
+
+    <main class="page">
+        <div class="panel">
+            <h2 class="section-title">Terjemah subtitle ke Indonesia</h2>
+
+            <div class="field">
+                <label for="videoFile">Video (file dari HP)</label>
+                <input type="file" id="videoFile" accept="video/*">
+            </div>
+            <div class="field">
+                <label for="videoUrl">atau link video langsung (.mp4)</label>
+                <input type="url" id="videoUrl" placeholder="https://.../video.mp4">
+            </div>
+            <div class="field">
+                <label for="subFile">File subtitle (.srt atau .vtt)</label>
+                <input type="file" id="subFile" accept=".srt,.vtt,text/vtt,application/x-subrip">
+                <p class="hint">Format .ass belum didukung. Konversi dulu ke .srt.</p>
+            </div>
+            <div class="field">
+                <label for="sourceLang">Bahasa subtitle asli</label>
+                <select id="sourceLang">
+                    <option value="auto">Deteksi otomatis</option>
+                    <option value="en">Inggris</option>
+                    <option value="ja">Jepang</option>
+                </select>
+            </div>
+
+            <div class="actions">
+                <button type="button" class="btn" id="translateBtn">Terjemahkan</button>
+                <button type="button" class="btn alt" id="downloadVtt" disabled>Unduh .vtt</button>
+                <button type="button" class="btn alt" id="downloadSrt" disabled>Unduh .srt</button>
+            </div>
+            <div class="status" id="status" aria-live="polite"></div>
+
+            <div class="stage">
+                <video id="player" controls playsinline></video>
+            </div>
+        </div>
+    </main>
+
+    <footer class="foot"><a href="/">Kembali ke beranda</a></footer>
+
+    <script src="subtitle.js"></script>
+</body>
+</html>
