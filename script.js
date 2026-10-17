@@ -309,7 +309,6 @@ function collectMedia(payload) {
 const YOUTUBE_EMBED = /^https:\/\/(www\.)?youtube(-nocookie)?\.com\//i;
 const IFRAME_ALLOW = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen';
 // Tanpa allow-top-navigation: tombol di dalam player tidak bisa mengalihkan halaman NontonKuy
-const IFRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-presentation';
 
 function embedReferrerPolicy(url) {
     return YOUTUBE_EMBED.test(url) ? 'strict-origin-when-cross-origin' : 'no-referrer';
@@ -321,7 +320,7 @@ function playerHtml(media, posterUrl) {
     const first = options[0];
     let html = first.kind === 'video'
         ? `<video id="detailPlayer" controls playsinline preload="metadata" referrerpolicy="no-referrer" ${posterUrl ? `poster="${escapeAttr(proxiedImage(posterUrl))}"` : ''} src="${escapeAttr(first.url)}"></video>`
-        : `<iframe id="detailEmbed" src="${escapeAttr(first.url)}" allow="${IFRAME_ALLOW}" sandbox="${IFRAME_SANDBOX}" allowfullscreen referrerpolicy="${embedReferrerPolicy(first.url)}"></iframe>`;
+        : `<iframe id="detailEmbed" src="${escapeAttr(first.url)}" allow="${IFRAME_ALLOW}" allowfullscreen referrerpolicy="${embedReferrerPolicy(first.url)}"></iframe>`;
     if (options.length > 1) {
         html += `<div class="modal-links">${options.map((o, i) => `<a href="#" data-kind="${o.kind}" data-src="${escapeAttr(o.url)}" class="${i === 0 ? 'current' : ''}">${escapeHtml(o.label)}</a>`).join('')}</div>`;
     }
@@ -341,7 +340,6 @@ function swapPlayer(container, kind, src) {
     } else {
         element.setAttribute('allowfullscreen', '');
         element.setAttribute('allow', IFRAME_ALLOW);
-        element.setAttribute('sandbox', IFRAME_SANDBOX);
         element.src = src;
     }
     holder.replaceWith(element);
