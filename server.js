@@ -20,8 +20,8 @@ app.use(express.json());
 
 const hentaimama = require('./lib/hentaimama');
 const xanimu = require('./lib/xanimu');
-const otakudesu = require('./lib/anichin');
-const anichin = require('./lib/otakudesu');
+const otakudesu = require('./lib/otakudesu');
+const anichin = require('./lib/anichin');
 const AniListScraper = require('./lib/anilist');
 const YouTubeScraper = require('./lib/youtube');
 const ZanixScraper = require('./lib/zanix');
@@ -32,13 +32,54 @@ const RuangkomikScraper = require('./lib/ruangkomik');
 
 const parsePage = (value) => parseInt(value, 10) || 1;
 
-const respondWith = (task) => async (req, res) => {
+
+const apiCache = new Map();
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const CACHE_MAX = 200;
+
+function cacheKey(req) {
+    return req.originalUrl || req.url;
+}
+
+function getCached(key) {
+    const hit = apiCache.get(key);
+    if (!hit) return null;
+    if (Date.now() > hit.expires) {
+        apiCache.delete(key);
+        return null;
+    }
+    return hit.data;
+}
+
+function setCache(key, data) {
+    if (apiCache.size >= CACHE_MAX) {
+        const first = apiCache.keys().next().value;
+        apiCache.delete(first);
+    }
+    apiCache.set(key, { data, expires: Date.now() + CACHE_TTL_MS });
+}
+
+const respondWithCached = (task) => async (req, res) => {
+    const key = cacheKey(req);
+    const skip = req.query && String(req.query.nocache || '') === '1';
+    if (!skip) {
+        const hit = getCached(key);
+        if (hit) {
+            res.set('X-Cache', 'HIT');
+            return res.json(hit);
+        }
+    }
     try {
-        res.json(await task(req));
+        const data = await task(req);
+        if (!skip) setCache(key, data);
+        res.set('X-Cache', 'MISS');
+        res.json(data);
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
 };
+
+const respondWith = respondWithCached;
 
 const rule34Route = (modulePath) => respondWith(async (req) => {
     const Scraper = require(modulePath);
@@ -68,6 +109,9 @@ const animeRoute = (Scraper) => respondWith(async (req) => {
         case 'search': return scraper.search(query, parsePage(page));
         case 'detail': return scraper.detail(query);
         case 'ongoing': return scraper.ongoing(parsePage(page));
+        case 'schedule':
+            if (typeof scraper.schedule === 'function') return scraper.schedule();
+            return scraper.home(1);
         default: return scraper.home(parsePage(page));
     }
 });
@@ -242,6 +286,16 @@ app.get('/style.css', (req, res) => res.sendFile(path.join(__dirname, 'style.css
 app.get('/script.js', (req, res) => res.sendFile(path.join(__dirname, 'script.js')));
 app.get('/subtitle.html', (req, res) => res.sendFile(path.join(__dirname, 'subtitle.html')));
 app.get('/subtitle.js', (req, res) => res.sendFile(path.join(__dirname, 'subtitle.js')));
+app.get('/manifest.webmanifest', (req, res) => {
+    res.type('application/manifest+json');
+    res.sendFile(path.join(__dirname, 'manifest.webmanifest'));
+});
+app.get('/sw.js', (req, res) => {
+    res.type('application/javascript');
+    res.set('Service-Worker-Allowed', '/');
+    res.sendFile(path.join(__dirname, 'sw.js'));
+});
+app.get('/icon.svg', (req, res) => res.sendFile(path.join(__dirname, 'icon.svg')));
 
 if (require.main === module) {
     app.listen(PORT, () => {

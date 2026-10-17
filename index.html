@@ -3,9 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#08090D">
-    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#0B0D12" id="metaTheme">
+    <meta name="color-scheme" content="dark light">
     <meta name="description" content="NontonKuy — nonton anime & baca manga">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
     <title>NontonKuy</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -24,6 +28,12 @@
                 <input type="search" id="searchInput" placeholder="Cari judul anime atau video…" autocomplete="off" enterkeyhint="search" aria-label="Cari judul">
                 <button type="button" id="searchBtn" aria-label="Cari">Cari</button>
             </form>
+            <div class="top-actions">
+                <button type="button" class="icon-btn" id="btnSchedule" title="Jadwal rilis" aria-label="Jadwal">📅</button>
+                <button type="button" class="icon-btn" id="btnHistory" title="Riwayat" aria-label="Riwayat">🕒</button>
+                <button type="button" class="icon-btn" id="btnWatchlist" title="Watchlist" aria-label="Watchlist">⭐</button>
+                <button type="button" class="icon-btn" id="btnTheme" title="Ganti tema" aria-label="Tema">☀️</button>
+            </div>
         </div>
         <nav class="tabs" id="animeTabs" aria-label="Kategori anime">
             <button class="tab-btn active" data-tab="all">Semua</button>
@@ -42,10 +52,38 @@
             <button class="tab-btn active" data-tab="ruangkomik">RuangKomik</button>
             <button class="tab-btn" data-tab="komikcast">Komikcast</button>
         </nav>
+        <div class="filter-bar" id="filterBar">
+            <select id="filterGenre" aria-label="Filter genre">
+                <option value="">Semua genre</option>
+                <option value="Action">Action</option>
+                <option value="Adventure">Adventure</option>
+                <option value="Comedy">Comedy</option>
+                <option value="Drama">Drama</option>
+                <option value="Fantasy">Fantasy</option>
+                <option value="Horror">Horror</option>
+                <option value="Mystery">Mystery</option>
+                <option value="Romance">Romance</option>
+                <option value="Sci-Fi">Sci-Fi</option>
+                <option value="Slice of Life">Slice of Life</option>
+                <option value="Sports">Sports</option>
+                <option value="Supernatural">Supernatural</option>
+                <option value="Thriller">Thriller</option>
+            </select>
+            <select id="filterStatus" aria-label="Filter status">
+                <option value="">Semua status</option>
+                <option value="ongoing">Ongoing</option>
+                <option value="completed">Tamat</option>
+                <option value="movie">Movie</option>
+            </select>
+            <button type="button" class="filter-clear" id="filterClear">Reset</button>
+        </div>
     </header>
 
     <main class="page">
-        <h2 class="section-title" id="sectionTitle">Rilis terbaru</h2>
+        <div class="section-head">
+            <h2 class="section-title" id="sectionTitle">Rilis terbaru</h2>
+            <p class="section-sub" id="sectionSub" hidden></p>
+        </div>
         <div id="results" class="grid" aria-live="polite"></div>
     </main>
 
@@ -55,6 +93,8 @@
             <div id="modalBody"></div>
         </div>
     </div>
+
+    <div id="toast" class="toast" hidden role="status"></div>
 
     <footer class="foot">
         <a href="/subtitle.html">Terjemah subtitle</a><br>

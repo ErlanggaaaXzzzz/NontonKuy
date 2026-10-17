@@ -28,11 +28,19 @@ const modal = document.getElementById('modal');
 const modalBody = document.getElementById('modalBody');
 const modalClose = document.querySelector('.modal-close');
 
+const clientCache = new Map();
+const CLIENT_CACHE_TTL = 3 * 60 * 1000;
+
 async function callAPI(endpoint, params = {}) {
     const startTime = performance.now();
     try {
         const url = new URL(endpoint);
         Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
+        const cacheKey = url.toString();
+        const hit = clientCache.get(cacheKey);
+        if (hit && Date.now() < hit.exp) {
+            return { success: true, data: hit.data, latency: 0, cached: true };
+        }
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
         let response;
@@ -43,13 +51,17 @@ async function callAPI(endpoint, params = {}) {
         }
         if (!response.ok) throw new Error('HTTP ' + response.status);
         const data = await response.json();
-        const endTime = performance.now();
-        const latency = Math.round(endTime - startTime);
+        clientCache.set(cacheKey, { data, exp: Date.now() + CLIENT_CACHE_TTL });
+        if (clientCache.size > 80) {
+            const k = clientCache.keys().next().value;
+            clientCache.delete(k);
+        }
+        const latency = Math.round(performance.now() - startTime);
         return { success: true, data, latency };
     } catch (error) {
-        const endTime = performance.now();
-        const latency = Math.round(endTime - startTime);
-        return { success: false, error: error.message, latency };
+        const latency = Math.round(performance.now() - startTime);
+        const msg = error.name === 'AbortError' ? 'Timeout — sumber lambat/tidak merespons' : error.message;
+        return { success: false, error: msg, latency };
     }
 }
 
@@ -170,17 +182,31 @@ function escapeAttr(text) {
 }
 
 function skeletonGrid(count = 12) {
-    return Array.from({ length: count }, () => '<div class="skeleton"></div>').join('');
+    return Array.from({ length: count }, (_, i) =>
+        `<article class="card skeleton" style="animation-delay:${i * 40}ms">
+            <div class="poster sk-shimmer"></div>
+            <div class="meta"><div class="sk-line sk-shimmer"></div><div class="sk-line short sk-shimmer"></div></div>
+        </article>`
+    ).join('');
 }
 
-function stateHtml(title, text, withRetry) {
-    return `<div class="state"><strong>${escapeHtml(title)}</strong>${escapeHtml(text || '')}${withRetry ? '<br><button type="button" data-retry="1">Muat ulang</button>' : ''}</div>`;
+function stateHtml(title, text, withRetry, sources) {
+    const extra = Array.isArray(sources) && sources.length
+        ? `<ul class="error-sources">${sources.map(s => `<li><strong>${escapeHtml(s.name)}</strong>: ${escapeHtml(s.error || 'gagal')}</li>`).join('')}</ul>`
+        : '';
+    return `<div class="state state-error">
+        <div class="state-icon">⚠️</div>
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(text)}</p>
+        ${extra}
+        ${withRetry ? '<button type="button" class="retry-btn" id="retryBtn">Coba lagi</button>' : ''}
+    </div>`;
 }
 
 function renderResults(items, fallbackSource) {
-    renderedItems = items || [];
+    renderedItems = applyClientFilters(items || []);
     if (renderedItems.length === 0) {
-        resultsEl.innerHTML = stateHtml('Tidak ada hasil', 'Coba kata kunci lain atau pilih kategori berbeda.');
+        resultsEl.innerHTML = stateHtml('Tidak ada hasil', 'Coba ubah filter, kata kunci, atau kategori.');
         return;
     }
 
@@ -190,8 +216,10 @@ function renderResults(items, fallbackSource) {
         const sourceLabel = item.source || fallbackSource || 'Unknown';
         const sourceClass = String(sourceLabel).toLowerCase().replace(/[^a-z0-9]/g, '');
         const badgeText = item.episode ? `Eps ${item.episode}` : (item.status || item.duration || '');
+        const key = storageKey(item);
+        const starred = isInWatchlist(key);
         const imageHtml = poster
-            ? `<img src="${escapeAttr(proxiedImage(poster))}" alt="${escapeAttr(title)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src=window.PLACEHOLDER_IMAGE">`
+            ? `<img src="${escapeAttr(proxiedImage(poster))}" alt="${escapeAttr(title)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src=window.PLACEHOLDER_IMAGE">`
             : `<img src="${window.PLACEHOLDER_IMAGE}" alt="${escapeAttr(title)}">`;
 
         return `
@@ -200,6 +228,7 @@ function renderResults(items, fallbackSource) {
                     ${imageHtml}
                     <span class="tag ${escapeAttr(sourceClass)}">${escapeHtml(sourceLabel)}</span>
                     ${badgeText ? `<span class="badge">${escapeHtml(badgeText)}</span>` : ''}
+                    <button type="button" class="star-btn ${starred ? 'on' : ''}" data-star="${index}" title="Watchlist" aria-label="Watchlist">${starred ? '★' : '☆'}</button>
                 </div>
                 <div class="card-title">${escapeHtml(title)}</div>
             </div>
@@ -221,8 +250,16 @@ resultsEl.addEventListener('click', (event) => {
         loadMore(moreButton);
         return;
     }
-    if (event.target.closest('[data-retry]')) {
+    if (event.target.closest('[data-retry]') || event.target.id === 'retryBtn') {
         loadTab(currentTab);
+        return;
+    }
+    const star = event.target.closest('[data-star]');
+    if (star) {
+        event.preventDefault();
+        event.stopPropagation();
+        const item = renderedItems[Number(star.dataset.star)];
+        if (item) toggleWatchlist(item);
         return;
     }
     const card = event.target.closest('.result-card');
@@ -232,6 +269,7 @@ resultsEl.addEventListener('click', (event) => {
     const link = item.link || item.url || '';
     const title = item.title || item.name || 'Untitled';
     const poster = item.poster || item.image || item.thumbnail || item.img || '';
+    addHistory({ title, link, url: link, image: poster, source: item.source || '', kind: item.kind || (currentMode === 'manga' ? 'manga' : 'anime') });
     window.openDetail(encodeURIComponent(link), item.source || '', title, poster);
 });
 
@@ -420,6 +458,16 @@ async function openEpisode(source, url, label) {
     const fetcher = EPISODE_FETCHERS[String(source).toLowerCase()];
     try {
         const result = fetcher ? await fetcher(url) : null;
+        // riwayat episode/chapter
+        try {
+            addHistory({
+                title: label,
+                link: url,
+                source: source,
+                episode: label,
+                kind: String(source).toLowerCase() === 'komikcast' || String(source).toLowerCase() === 'ruangkomik' ? 'manga' : 'anime'
+            });
+        } catch (_) {}
         const payload = result && result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : result;
         if (!payload) throw new Error('Episode tidak ditemukan');
 
@@ -636,7 +684,7 @@ async function runList(keys, mode, query, title) {
     if (items.length === 0) {
         resultsEl.innerHTML = mode === 'search'
             ? stateHtml('Tidak ada hasil', `Tidak ada yang cocok dengan "${query}".`)
-            : stateHtml('Data belum tersedia', `Tidak ada respons dari ${failed.join(', ')}.`, true);
+            : stateHtml('Data belum tersedia', 'Semua sumber gagal atau kosong. Cek koneksi atau coba lagi.', true, failed.map(f => ({ name: f, error: 'tidak merespons' })));
         return;
     }
 
@@ -674,6 +722,197 @@ async function loadTab(tab) {
     const keys = TAB_SOURCES[tab] || TAB_SOURCES.all;
     await runList(keys, 'home', null, tab === 'all' ? 'Rilis terbaru' : 'Terbaru di ' + tabLabel(tab));
 }
+
+
+/* ========== Storage: riwayat & watchlist ========== */
+const LS_HISTORY = 'nk_history_v1';
+const LS_WATCH = 'nk_watchlist_v1';
+const LS_THEME = 'nk_theme';
+
+function readJSON(key, fallback) {
+    try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+    } catch (_) {
+        return fallback;
+    }
+}
+
+function writeJSON(key, value) {
+    try {
+        localStorage.setItem(key, JSON.stringify(value));
+    } catch (_) {}
+}
+
+function storageKey(item) {
+    return `${item.source || ''}::${item.link || item.url || item.title || ''}`;
+}
+
+function getHistory() {
+    return readJSON(LS_HISTORY, []);
+}
+
+function addHistory(entry) {
+    const list = getHistory().filter((h) => storageKey(h) !== storageKey(entry));
+    list.unshift({
+        title: entry.title,
+        link: entry.link || entry.url,
+        url: entry.url || entry.link,
+        image: entry.image || entry.poster || '',
+        source: entry.source || '',
+        episode: entry.episode || '',
+        kind: entry.kind || 'anime',
+        at: Date.now()
+    });
+    writeJSON(LS_HISTORY, list.slice(0, 60));
+}
+
+function getWatchlist() {
+    return readJSON(LS_WATCH, []);
+}
+
+function isInWatchlist(key) {
+    return getWatchlist().some((w) => storageKey(w) === key);
+}
+
+function toggleWatchlist(item) {
+    const key = storageKey(item);
+    let list = getWatchlist();
+    if (isInWatchlist(key)) {
+        list = list.filter((w) => storageKey(w) !== key);
+        showToast('Dihapus dari watchlist');
+    } else {
+        list.unshift({
+            title: item.title || item.name,
+            link: item.link || item.url,
+            url: item.url || item.link,
+            image: item.image || item.poster || item.thumbnail || '',
+            source: item.source || '',
+            episode: item.episode || '',
+            kind: item.kind || 'anime',
+            at: Date.now()
+        });
+        showToast('Ditambah ke watchlist');
+    }
+    writeJSON(LS_WATCH, list.slice(0, 100));
+    if (typeof renderResults === 'function' && currentResults.length) {
+        renderResults(currentResults, 'All Sources');
+    }
+}
+
+function showToast(msg) {
+    const el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.hidden = false;
+    el.classList.add('show');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => {
+        el.classList.remove('show');
+        el.hidden = true;
+    }, 2200);
+}
+
+function applyClientFilters(items) {
+    const genreEl = document.getElementById('filterGenre');
+    const statusEl = document.getElementById('filterStatus');
+    const genre = genreEl ? genreEl.value : '';
+    const status = statusEl ? statusEl.value : '';
+    if (!genre && !status) return items;
+    return items.filter((item) => {
+        const blob = `${item.title || ''} ${item.status || ''} ${item.genres || ''} ${item.description || ''} ${item.episode || ''}`.toLowerCase();
+        if (genre && !blob.includes(genre.toLowerCase())) return false;
+        if (status === 'ongoing' && !/ongoing|airing|berlangsung|update/i.test(blob)) return false;
+        if (status === 'completed' && !/complete|tamat|finished|end/i.test(blob)) return false;
+        if (status === 'movie' && !/movie|film|ova/i.test(blob)) return false;
+        return true;
+    });
+}
+
+function setTheme(theme) {
+    const next = theme === 'light' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    writeJSON(LS_THEME, next);
+    const btn = document.getElementById('btnTheme');
+    if (btn) btn.textContent = next === 'light' ? '🌙' : '☀️';
+    const meta = document.getElementById('metaTheme');
+    if (meta) meta.setAttribute('content', next === 'light' ? '#F4F5F8' : '#0B0D12');
+}
+
+function initTheme() {
+    const saved = readJSON(LS_THEME, null);
+    const preferLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+    setTheme(saved || (preferLight ? 'light' : 'dark'));
+}
+
+function renderLibrary(list, emptyTitle, emptyText) {
+    setSectionTitle(emptyTitle);
+    const sub = document.getElementById('sectionSub');
+    if (sub) {
+        sub.hidden = false;
+        sub.textContent = `${list.length} item tersimpan di perangkat ini`;
+    }
+    if (!list.length) {
+        resultsEl.innerHTML = stateHtml(emptyTitle, emptyText);
+        currentResults = [];
+        return;
+    }
+    currentResults = list.map((x) => ({ ...x }));
+    renderResults(currentResults, 'Lokal');
+}
+
+async function loadSchedule() {
+    setSectionTitle('Jadwal rilis');
+    const sub = document.getElementById('sectionSub');
+    if (sub) {
+        sub.hidden = false;
+        sub.textContent = 'Sumber: OtakuDesu / Nontonime';
+    }
+    resultsEl.innerHTML = skeletonGrid(10);
+    try {
+        let items = [];
+        const od = await fetchOtakuDesu('schedule', {});
+        if (od) {
+            const days = od.schedule || od.days || od.data || od;
+            if (Array.isArray(days)) {
+                days.forEach((d) => {
+                    const dayName = d.day || d.title || '';
+                    (d.anime || d.items || []).forEach((a) => {
+                        items.push({
+                            title: `${a.title || a.name} (${dayName})`,
+                            link: a.link || a.url || a.slug || '',
+                            image: a.image || a.poster || '',
+                            source: 'otakudesu',
+                            episode: a.time || a.episode || dayName,
+                            status: dayName
+                        });
+                    });
+                });
+            } else if (Array.isArray(od.items)) {
+                items = od.items;
+            }
+        }
+        if (!items.length) {
+            const home = await fetchNontonime('home', { page: 1 });
+            items = (home && home.items) || [];
+            if (sub) sub.textContent = 'Fallback: update terbaru Nontonime';
+        }
+        currentResults = items;
+        if (!items.length) {
+            resultsEl.innerHTML = stateHtml('Jadwal kosong', 'Sumber jadwal sedang tidak tersedia.', true);
+            return;
+        }
+        renderResults(items, 'Jadwal');
+    } catch (e) {
+        resultsEl.innerHTML = stateHtml('Gagal memuat jadwal', e.message || 'Coba lagi nanti', true);
+    }
+}
+
+function registerPWA() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
 
 let currentMode = 'anime';
 const animeTabs = document.getElementById('animeTabs');
@@ -728,6 +967,36 @@ document.addEventListener('keydown', (e) => {
 });
 modal.addEventListener('click', (e) => {
     if (e.target === modal) modal.classList.remove('active');
+});
+
+initTheme();
+registerPWA();
+
+const btnTheme = document.getElementById('btnTheme');
+if (btnTheme) btnTheme.addEventListener('click', () => {
+    const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+    setTheme(cur === 'dark' ? 'light' : 'dark');
+});
+const btnHistory = document.getElementById('btnHistory');
+if (btnHistory) btnHistory.addEventListener('click', () => renderLibrary(getHistory(), 'Riwayat', 'Belum ada riwayat tonton/baca.'));
+const btnWatchlist = document.getElementById('btnWatchlist');
+if (btnWatchlist) btnWatchlist.addEventListener('click', () => renderLibrary(getWatchlist(), 'Watchlist', 'Watchlist masih kosong. Ketuk ★ di poster.'));
+const btnSchedule = document.getElementById('btnSchedule');
+if (btnSchedule) btnSchedule.addEventListener('click', () => loadSchedule());
+
+['filterGenre', 'filterStatus'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', () => {
+        if (currentResults.length) renderResults(currentResults, 'All Sources');
+    });
+});
+const filterClear = document.getElementById('filterClear');
+if (filterClear) filterClear.addEventListener('click', () => {
+    const g = document.getElementById('filterGenre');
+    const s = document.getElementById('filterStatus');
+    if (g) g.value = '';
+    if (s) s.value = '';
+    if (currentResults.length) renderResults(currentResults, 'All Sources');
 });
 
 loadTab('all');
