@@ -8,7 +8,8 @@ const API_ENDPOINTS = {
     otakudesu: `${API_BASE}/otakudesu.js`,
     anichin: `${API_BASE}/anichin.js`,
     anilist: `${API_BASE}/anilist.js`,
-    youtube: `${API_BASE}/youtube.js`
+    youtube: `${API_BASE}/youtube.js`,
+    zanix: `${API_BASE}/zanix.js`
 };
 
 const REQUEST_TIMEOUT_MS = 12000;
@@ -91,6 +92,14 @@ async function fetchAniList(action, params = {}) {
 
 async function fetchYouTube(action, params = {}) {
     const result = await callAPI(API_ENDPOINTS.youtube, { action, ...params });
+    if (result.success) {
+        return result.data;
+    }
+    return null;
+}
+
+async function fetchZanix(action, params = {}) {
+    const result = await callAPI(API_ENDPOINTS.zanix, { action, ...params });
     if (result.success) {
         return result.data;
     }
@@ -227,6 +236,9 @@ window.openDetail = async function(encodedLink, source, title, poster) {
             case 'youtube':
                 detailData = await fetchYouTube('detail', { query: link });
                 break;
+            case 'zanix':
+                detailData = await fetchZanix('detail', { query: link });
+                break;
             case 'anilist':
                 detailData = await fetchAniList('detail', { query: link });
                 break;
@@ -348,7 +360,8 @@ const EPISODE_FETCHERS = {
     otakudesu: (url) => fetchOtakuDesu('episode', { url }),
     anichin: (url) => fetchAnichin('episode', { url }),
     hentaimama: (url) => fetchHentaiMama('episode', { url }),
-    youtube: (url) => fetchYouTube('episode', { url })
+    youtube: (url) => fetchYouTube('episode', { url }),
+    zanix: (url) => fetchZanix('episode', { url })
 };
 
 async function openEpisode(source, url, label) {
@@ -388,17 +401,20 @@ function renderDetail(data, source, poster) {
     const episodes = Array.isArray(payload.episodes) ? payload.episodes : [];
     const player = playerHtml(media, posterUrl);
 
+    const isYoutubeSource = String(source).toLowerCase() === 'youtube';
+
     let html = `<h3 class="modal-title">${escapeHtml(title)}</h3>`;
-    if (player) {
+    // Player embed (Zanix & sumber lain) diputar di website ini
+    if (!isYoutubeSource && player) {
         html += `<div id="mainPlayer">${player}</div>`;
     } else if (posterUrl) {
         html += `<img src="${escapeAttr(proxiedImage(posterUrl))}" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src=window.PLACEHOLDER_IMAGE" />`;
     }
     if (description) html += `<p class="modal-description">${escapeHtml(description)}</p>`;
 
-    if (episodes.length > 0) {
+    if (!isYoutubeSource && episodes.length > 0) {
         html += `<p class="modal-label">Daftar episode</p><div class="modal-links">`;
-        episodes.slice(0, 80).forEach(ep => {
+        episodes.slice(0, 200).forEach(ep => {
             const epUrl = ep.url || ep.link || '';
             const epLabel = ep.title || ep.name || (ep.number ? `Episode ${ep.number}` : 'Episode');
             if (epUrl) html += `<a href="#" data-episode="${escapeAttr(epUrl)}" data-label="${escapeAttr(epLabel)}">${escapeHtml(epLabel)}</a>`;
@@ -406,12 +422,15 @@ function renderDetail(data, source, poster) {
         html += `</div><div id="episodeArea"></div>`;
     }
 
-    if (!player && episodes.length === 0 && !(Array.isArray(payload.watchLinks) && payload.watchLinks.length > 0)) {
+    if (!isYoutubeSource && !player && episodes.length === 0 && !(Array.isArray(payload.watchLinks) && payload.watchLinks.length > 0)) {
         html += `<p class="modal-description">Belum ada video yang bisa diputar dari sumber ini.</p>`;
     }
 
-    if (Array.isArray(payload.watchLinks) && payload.watchLinks.length > 0) {
-        html += `<p class="modal-label">Tonton resmi</p><div class="modal-links">${payload.watchLinks.map(w => `<a href="${escapeAttr(w.url)}" target="_blank" rel="noopener">${escapeHtml(w.label)}</a>`).join('')}</div>`;
+    if (!isYoutubeSource && Array.isArray(payload.watchLinks) && payload.watchLinks.length > 0) {
+        const links = payload.watchLinks.filter(w => !/youtube\.com|youtu\.be/i.test(w.url || ''));
+        if (links.length > 0) {
+            html += `<p class="modal-label">Link eksternal</p><div class="modal-links">${links.map(w => `<a href="${escapeAttr(w.url)}" target="_blank" rel="noopener">${escapeHtml(w.label)}</a>`).join('')}</div>`;
+        }
     }
 
     if (media.downloads.length > 0) {
@@ -444,6 +463,7 @@ function extractItems(payload) {
 }
 
 const SOURCES = {
+    zanix: { label: 'Zanix', home: (_, page = 1) => fetchZanix('home', { page }), search: (q, page = 1) => fetchZanix('search', { query: q, page }) },
     youtube: { label: 'YouTube', home: (_, page = 1) => fetchYouTube('home', { page }), search: (q, page = 1) => fetchYouTube('search', { query: q, page }) },
     anilist: { label: 'AniList', home: (_, page = 1) => fetchAniList('home', { page }), search: (q, page = 1) => fetchAniList('search', { query: q, page }) },
     anichin: { label: 'Anichin', home: (_, page = 1) => fetchAnichin('home', { page }), search: (q, page = 1) => fetchAnichin('search', { query: q, page }) },
@@ -454,10 +474,11 @@ const SOURCES = {
 };
 
 const TAB_SOURCES = {
-    all: ['youtube', 'anilist', 'anichin', 'otakudesu', 'xanimu', 'hentaimama', 'rule34video'],
+    all: ['zanix', 'anilist', 'anichin', 'otakudesu', 'xanimu', 'hentaimama', 'rule34video'],
     anilist: ['anilist'],
     youtube: ['youtube'],
-    anime: ['anichin'],
+    zanix: ['zanix'],
+    anime: ['zanix', 'anichin', 'otakudesu'],
     hentai: ['hentaimama'],
     videos: ['rule34video'],
     otakudesu: ['otakudesu'],
@@ -492,7 +513,7 @@ function failedNote(failed) {
     return `<div class="note">Belum merespons: ${escapeHtml(failed.join(', '))}</div>`;
 }
 
-const TAB_LABELS = { all: 'Semua', anilist: 'Katalog', youtube: 'Resmi', anime: 'Anime', hentai: 'Hentai', videos: 'Video', otakudesu: 'OtakuDesu', anichin: 'Anichin', xanimu: 'XAnimu' };
+const TAB_LABELS = { all: 'Semua', anilist: 'Katalog', youtube: 'Resmi', zanix: 'Zanix', anime: 'Anime', hentai: 'Hentai', videos: 'Video', otakudesu: 'OtakuDesu', anichin: 'Anichin', xanimu: 'XAnimu' };
 
 function tabLabel(tab) {
     return TAB_LABELS[tab] || tab;

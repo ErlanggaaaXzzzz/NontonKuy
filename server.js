@@ -24,6 +24,7 @@ const otakudesu = require('./lib/anichin');
 const anichin = require('./lib/otakudesu');
 const AniListScraper = require('./lib/anilist');
 const YouTubeScraper = require('./lib/youtube');
+const ZanixScraper = require('./lib/zanix');
 
 const parsePage = (value) => parseInt(value, 10) || 1;
 
@@ -75,6 +76,19 @@ app.get('/api/otakudesu.js', animeRoute(otakudesu));
 app.get('/api/anichin.js', animeRoute(anichin));
 app.get('/api/anilist.js', animeRoute(AniListScraper));
 app.get('/api/youtube.js', animeRoute(YouTubeScraper));
+app.get('/api/zanix.js', respondWith(async (req) => {
+    const scraper = new ZanixScraper();
+    const { action, query, page, url } = req.query;
+    switch (action) {
+        case 'episode':
+            if (!url) throw new Error('URL episode tidak valid');
+            return scraper.episode(String(url));
+        case 'search': return scraper.search(query, parsePage(page));
+        case 'detail': return scraper.detail(query);
+        case 'ongoing': return scraper.ongoing(parsePage(page));
+        default: return scraper.home(parsePage(page));
+    }
+}));
 
 const isPrivateAddress = (address) => {
     if (net.isIPv4(address)) {
