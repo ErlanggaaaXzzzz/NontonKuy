@@ -16,6 +16,99 @@ const API_ENDPOINTS = {
     ruangkomik: `${API_BASE}/ruangkomik.js`
 };
 
+
+/* ——— CAPTCHA / session token ——— */
+let nkAccessToken = sessionStorage.getItem('nk_access_token') || '';
+let nkCaptchaReady = false;
+
+async function ensureCaptcha() {
+    if (nkAccessToken) {
+        nkCaptchaReady = true;
+        hideCaptchaGate();
+        return true;
+    }
+    showCaptchaGate();
+    return false;
+}
+
+function showCaptchaGate() {
+    const gate = document.getElementById('captchaGate');
+    if (gate) gate.hidden = false;
+    loadCaptchaChallenge();
+}
+
+function hideCaptchaGate() {
+    const gate = document.getElementById('captchaGate');
+    if (gate) gate.hidden = true;
+}
+
+async function loadCaptchaChallenge() {
+    const q = document.getElementById('captchaQuestion');
+    const err = document.getElementById('captchaError');
+    if (err) err.hidden = true;
+    try {
+        const res = await fetch(API_BASE + '/captcha');
+        const data = await res.json();
+        if (data.disabled && data.token) {
+            nkAccessToken = data.token;
+            sessionStorage.setItem('nk_access_token', nkAccessToken);
+            nkCaptchaReady = true;
+            hideCaptchaGate();
+            if (typeof loadTab === 'function') loadTab(typeof currentTab !== 'undefined' ? currentTab : 'all');
+            return;
+        }
+        if (!data.success || !data.challenge) throw new Error(data.error || 'Gagal memuat captcha');
+        window.__nkCaptchaId = data.challenge.id;
+        if (q) q.textContent = data.challenge.question;
+    } catch (e) {
+        if (q) q.textContent = 'Gagal memuat soal. Muat ulang halaman.';
+    }
+}
+
+async function submitCaptcha(answer) {
+    const err = document.getElementById('captchaError');
+    try {
+        const res = await fetch(API_BASE + '/captcha/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: window.__nkCaptchaId, answer })
+        });
+        const data = await res.json();
+        if (!data.success || !data.token) {
+            if (err) {
+                err.hidden = false;
+                err.textContent = data.error || 'Jawaban salah';
+            }
+            loadCaptchaChallenge();
+            return false;
+        }
+        nkAccessToken = data.token;
+        sessionStorage.setItem('nk_access_token', nkAccessToken);
+        nkCaptchaReady = true;
+        hideCaptchaGate();
+        if (typeof loadTab === 'function') loadTab(typeof currentTab !== 'undefined' ? currentTab : 'all');
+        return true;
+    } catch (e) {
+        if (err) {
+            err.hidden = false;
+            err.textContent = 'Verifikasi gagal. Coba lagi.';
+        }
+        return false;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('captchaForm');
+    if (form) {
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const val = document.getElementById('captchaAnswer')?.value;
+            submitCaptcha(val);
+        });
+    }
+});
+
+
 const REQUEST_TIMEOUT_MS = 12000;
 let currentTab = 'all';
 let currentResults = [];
@@ -45,7 +138,19 @@ async function callAPI(endpoint, params = {}) {
         const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
         let response;
         try {
-            response = await fetch(url, { signal: controller.signal });
+            const headers = {};
+            if (nkAccessToken) headers['X-NK-Token'] = nkAccessToken;
+            response = await fetch(url, { signal: controller.signal, headers });
+            if (response.status === 403) {
+                try {
+                    const body = await response.clone().json();
+                    if (body && body.code === 'CAPTCHA_REQUIRED') {
+                        nkAccessToken = '';
+                        sessionStorage.removeItem('nk_access_token');
+                        showCaptchaGate();
+                    }
+                } catch (_) {}
+            }
         } finally {
             clearTimeout(timer);
         }
@@ -195,7 +300,7 @@ function stateHtml(title, text, withRetry, sources) {
         ? `<ul class="error-sources">${sources.map(s => `<li><strong>${escapeHtml(s.name)}</strong>: ${escapeHtml(s.error || 'gagal')}</li>`).join('')}</ul>`
         : '';
     return `<div class="state state-error">
-        <div class="state-icon">⚠️</div>
+        
         <h3>${escapeHtml(title)}</h3>
         <p>${escapeHtml(text)}</p>
         ${extra}
@@ -228,7 +333,7 @@ function renderResults(items, fallbackSource) {
                     ${imageHtml}
                     <span class="tag ${escapeAttr(sourceClass)}">${escapeHtml(sourceLabel)}</span>
                     ${badgeText ? `<span class="badge">${escapeHtml(badgeText)}</span>` : ''}
-                    <button type="button" class="star-btn ${starred ? 'on' : ''}" data-star="${index}" title="Watchlist" aria-label="Watchlist">${starred ? '★' : '☆'}</button>
+                    <button type="button" class="star-btn ${starred ? 'on' : ''}" data-star="${index}" title="Watchlist" aria-label="Watchlist">${starred ? 'Fav' : '+Fav'}</button>
                 </div>
                 <div class="card-title">${escapeHtml(title)}</div>
             </div>
@@ -399,6 +504,17 @@ function embedReferrerPolicy(url) {
 function playerHtml(media, posterUrl) {
     const options = media.direct.map(m => ({ ...m, kind: 'video' })).concat(media.embeds.map(m => ({ ...m, kind: 'embed' })));
     if (options.length === 0) return '';
+    options.sort((a, b) => {
+        const score = (l) => {
+            const s = String(l || '').toLowerCase();
+            if (/1080|fhd/.test(s)) return 3;
+            if (/720|hd/.test(s)) return 2;
+            if (/480/.test(s)) return 1;
+            if (/360|sd/.test(s)) return 0;
+            return 1.5;
+        };
+        return score(b.label) - score(a.label);
+    });
     const first = options[0];
     let html = first.kind === 'video'
         ? `<video id="detailPlayer" controls playsinline preload="metadata" referrerpolicy="no-referrer" ${posterUrl ? `poster="${escapeAttr(proxiedImage(posterUrl))}"` : ''} src="${escapeAttr(first.url)}"></video>`
@@ -471,19 +587,85 @@ async function openEpisode(source, url, label) {
         const payload = result && result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : result;
         if (!payload) throw new Error('Episode tidak ditemukan');
 
-        // Manga reader: vertical page images
+        // Manga reader: vertical page images + toolbar
         if (payload.kind === 'manga' || (Array.isArray(payload.pages) && payload.pages.length > 0)) {
             const pages = payload.pages || [];
             let html = `<p class="modal-label">${escapeHtml(payload.title || label)}</p>`;
-            html += `<div class="manga-reader">`;
+            html += `<div class="reader-toolbar">
+                <button type="button" class="chip-btn" data-reader="webtoon">Webtoon</button>
+                <button type="button" class="chip-btn" data-reader="page">Per halaman</button>
+                <button type="button" class="chip-btn" data-zoom="-">Zoom −</button>
+                <button type="button" class="chip-btn" data-zoom="+">Zoom +</button>
+                <button type="button" class="chip-btn" data-dl="1">Link gambar</button>
+            </div>`;
+            html += `<div class="manga-reader mode-webtoon" id="mangaReader">`;
             pages.forEach((src, i) => {
-                html += `<img class="manga-page" src="${escapeAttr(src)}" alt="Halaman ${i + 1}" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'">`;
+                html += `<img class="manga-page" data-i="${i}" src="${escapeAttr(src)}" alt="Halaman ${i + 1}" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'">`;
             });
             html += `</div>`;
+            html += `<div class="reader-nav">
+                <button type="button" class="chip-btn" id="readerPrev">Prev</button>
+                <span id="readerPos">1 / ${pages.length}</span>
+                <button type="button" class="chip-btn" id="readerNext">Next</button>
+            </div>`;
             if (Array.isArray(payload.watchLinks) && payload.watchLinks.length) {
                 html += `<div class="modal-links">${payload.watchLinks.map(w => `<a href="${escapeAttr(w.url)}" target="_blank" rel="noopener">${escapeHtml(w.label)}</a>`).join('')}</div>`;
             }
+            // batch download list
+            html += `<details class="batch-dl"><summary>Daftar link halaman (${pages.length})</summary><ol class="batch-list">`;
+            pages.forEach((src, i) => {
+                html += `<li><a href="${escapeAttr(src)}" target="_blank" rel="noopener">Halaman ${i + 1}</a></li>`;
+            });
+            html += `</ol></details>`;
             area.innerHTML = html;
+            // reader interactions
+            const reader = area.querySelector('#mangaReader');
+            let zoom = 1;
+            let pageIdx = 0;
+            const imgs = () => [...area.querySelectorAll('.manga-page')];
+            const updatePos = () => {
+                const el = area.querySelector('#readerPos');
+                if (el) el.textContent = `${pageIdx + 1} / ${pages.length}`;
+            };
+            area.querySelectorAll('[data-reader]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    reader.classList.toggle('mode-page', btn.dataset.reader === 'page');
+                    reader.classList.toggle('mode-webtoon', btn.dataset.reader === 'webtoon');
+                    if (btn.dataset.reader === 'page') {
+                        imgs().forEach((img, i) => { img.style.display = i === pageIdx ? 'block' : 'none'; });
+                    } else {
+                        imgs().forEach((img) => { img.style.display = 'block'; });
+                    }
+                });
+            });
+            area.querySelectorAll('[data-zoom]').forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    zoom = Math.min(2.5, Math.max(0.6, zoom + (btn.dataset.zoom === '+' ? 0.15 : -0.15)));
+                    reader.style.setProperty('--reader-zoom', String(zoom));
+                });
+            });
+            area.querySelector('[data-dl]')?.addEventListener('click', () => {
+                const d = area.querySelector('.batch-dl');
+                if (d) d.open = !d.open;
+            });
+            area.querySelector('#readerPrev')?.addEventListener('click', () => {
+                pageIdx = Math.max(0, pageIdx - 1);
+                if (reader.classList.contains('mode-page')) {
+                    imgs().forEach((img, i) => { img.style.display = i === pageIdx ? 'block' : 'none'; });
+                } else {
+                    imgs()[pageIdx]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+                updatePos();
+            });
+            area.querySelector('#readerNext')?.addEventListener('click', () => {
+                pageIdx = Math.min(pages.length - 1, pageIdx + 1);
+                if (reader.classList.contains('mode-page')) {
+                    imgs().forEach((img, i) => { img.style.display = i === pageIdx ? 'block' : 'none'; });
+                } else {
+                    imgs()[pageIdx]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+                updatePos();
+            });
             area.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             return;
         }
@@ -637,7 +819,7 @@ function failedNote(failed) {
     return `<div class="note">Belum merespons: ${escapeHtml(failed.join(', '))}</div>`;
 }
 
-const TAB_LABELS = { all: 'Semua', anilist: 'Katalog', youtube: 'Resmi', zanix: 'Zanix', oploverz: 'Oploverz', komikcast: 'Komikcast', manga_all: 'Semua Manga', nontonime: 'Nontonime', ruangkomik: 'RuangKomik', anime: 'Anime', hentai: 'Hentai', videos: 'Video', otakudesu: 'OtakuDesu', anichin: 'Anichin', xanimu: 'XAnimu' };
+const TAB_LABELS = { all: 'Semua', anilist: 'Katalog', youtube: 'Resmi', zanix: 'Zanix', oploverz: 'Oploverz', komikcast: 'Komikcast', manga_all: 'Semua Manga', donghua: 'Donghua', nontonime: 'Nontonime', ruangkomik: 'RuangKomik', anime: 'Anime', hentai: 'Hentai', videos: 'Video', otakudesu: 'OtakuDesu', anichin: 'Anichin', xanimu: 'XAnimu' };
 
 function tabLabel(tab) {
     return TAB_LABELS[tab] || tab;
@@ -720,7 +902,11 @@ async function performSearch(query) {
 async function loadTab(tab) {
     currentTab = tab;
     updateSearchPlaceholder();
-    const keys = TAB_SOURCES[tab] || TAB_SOURCES.all;
+    let keys = TAB_SOURCES[tab] || TAB_SOURCES.all;
+    try {
+        const disabled = new Set(JSON.parse(localStorage.getItem('nk_disabled_sources_v1') || '[]'));
+        keys = keys.filter((k) => !disabled.has(k));
+    } catch (_) {}
     await runList(keys, 'home', null, tab === 'all' ? 'Rilis terbaru' : 'Terbaru di ' + tabLabel(tab));
 }
 
@@ -835,7 +1021,7 @@ function setTheme(theme) {
     document.documentElement.setAttribute('data-theme', next);
     writeJSON(LS_THEME, next);
     const btn = document.getElementById('btnTheme');
-    if (btn) btn.textContent = next === 'light' ? '🌙' : '☀️';
+    if (btn) btn.textContent = next === 'light' ? 'Gelap' : 'Terang';
     const meta = document.getElementById('metaTheme');
     if (meta) meta.setAttribute('content', next === 'light' ? '#F4F5F8' : '#0B0D12');
 }
@@ -981,7 +1167,7 @@ if (btnTheme) btnTheme.addEventListener('click', () => {
 const btnHistory = document.getElementById('btnHistory');
 if (btnHistory) btnHistory.addEventListener('click', () => renderLibrary(getHistory(), 'Riwayat', 'Belum ada riwayat tonton/baca.'));
 const btnWatchlist = document.getElementById('btnWatchlist');
-if (btnWatchlist) btnWatchlist.addEventListener('click', () => renderLibrary(getWatchlist(), 'Watchlist', 'Watchlist masih kosong. Ketuk ★ di poster.'));
+if (btnWatchlist) btnWatchlist.addEventListener('click', () => renderLibrary(getWatchlist(), 'Watchlist', 'Watchlist masih kosong. Ketuk +Fav di poster.'));
 const btnSchedule = document.getElementById('btnSchedule');
 if (btnSchedule) btnSchedule.addEventListener('click', () => loadSchedule());
 
@@ -1000,4 +1186,12 @@ if (filterClear) filterClear.addEventListener('click', () => {
     if (currentResults.length) renderResults(currentResults, 'All Sources');
 });
 
-loadTab('all');
+(async function boot() {
+    if (nkAccessToken) {
+        nkCaptchaReady = true;
+        hideCaptchaGate();
+        loadTab('all');
+    } else {
+        showCaptchaGate();
+    }
+})();

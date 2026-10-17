@@ -18,6 +18,10 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+const shield = require('./lib/shield');
+shield.registerRoutes(app);
+app.use(shield.apiShield);
+
 const hentaimama = require('./lib/hentaimama');
 const xanimu = require('./lib/xanimu');
 const otakudesu = require('./lib/otakudesu');
@@ -296,6 +300,7 @@ app.get('/sw.js', (req, res) => {
     res.sendFile(path.join(__dirname, 'sw.js'));
 });
 app.get('/icon.svg', (req, res) => res.sendFile(path.join(__dirname, 'icon.svg')));
+app.get('/nk-features.js', (req, res) => res.sendFile(path.join(__dirname, 'nk-features.js')));
 
 if (require.main === module) {
     app.listen(PORT, () => {

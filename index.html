@@ -17,6 +17,19 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <div id="captchaGate" class="captcha-gate" hidden>
+        <div class="captcha-card">
+            <h2>Verifikasi singkat</h2>
+            <p>Selesaikan soal ini untuk lanjut memakai NontonKuy. Ini membantu mengurangi bot dan scraper.</p>
+            <p class="captcha-q" id="captchaQuestion">Memuat soal…</p>
+            <form id="captchaForm" class="captcha-form" autocomplete="off">
+                <input type="number" id="captchaAnswer" inputmode="numeric" placeholder="Jawaban" required>
+                <button type="submit" id="captchaSubmit">Lanjut</button>
+            </form>
+            <p class="captcha-error" id="captchaError" hidden></p>
+        </div>
+    </div>
+
     <header class="topbar">
         <div class="topbar-inner">
             <a class="brand" href="/">Nonton<b>Kuy</b></a>
@@ -29,10 +42,13 @@
                 <button type="button" id="searchBtn" aria-label="Cari">Cari</button>
             </form>
             <div class="top-actions">
-                <button type="button" class="icon-btn" id="btnSchedule" title="Jadwal rilis" aria-label="Jadwal">📅</button>
-                <button type="button" class="icon-btn" id="btnHistory" title="Riwayat" aria-label="Riwayat">🕒</button>
-                <button type="button" class="icon-btn" id="btnWatchlist" title="Watchlist" aria-label="Watchlist">⭐</button>
-                <button type="button" class="icon-btn" id="btnTheme" title="Ganti tema" aria-label="Tema">☀️</button>
+                <button type="button" class="icon-btn text-icon-btn" id="btnSchedule" title="Jadwal rilis" aria-label="Jadwal">Jadwal</button>
+                <button type="button" class="icon-btn text-icon-btn" id="btnRandom" title="Acak" aria-label="Acak">Acak</button>
+                <button type="button" class="icon-btn text-icon-btn" id="btnUpdates" title="Cek update" aria-label="Update">Update</button>
+                <button type="button" class="icon-btn text-icon-btn" id="btnHistory" title="Riwayat" aria-label="Riwayat">Riwayat</button>
+                <button type="button" class="icon-btn text-icon-btn" id="btnWatchlist" title="Watchlist" aria-label="Watchlist">Favorit</button>
+                <button type="button" class="icon-btn text-icon-btn" id="btnAdmin" title="Pengaturan" aria-label="Pengaturan">Setelan</button>
+                <button type="button" class="icon-btn text-icon-btn" id="btnTheme" title="Ganti tema" aria-label="Tema">Tema</button>
             </div>
         </div>
         <nav class="tabs" id="animeTabs" aria-label="Kategori anime">
@@ -47,6 +63,7 @@
             <button class="tab-btn" data-tab="otakudesu">OtakuDesu</button>
             <button class="tab-btn" data-tab="anichin">Anichin</button>
             <button class="tab-btn" data-tab="xanimu">XAnimu</button>
+            <button class="tab-btn" data-tab="donghua">Donghua</button>
         </nav>
         <nav class="tabs hidden" id="mangaTabs" aria-label="Kategori manga">
             <button class="tab-btn active" data-tab="manga_all">Semua</button>
@@ -77,16 +94,26 @@
                 <option value="movie">Movie</option>
             </select>
             <button type="button" class="filter-clear" id="filterClear">Reset</button>
+            <select id="sortSelect" aria-label="Urutkan">
+                <option value="default">Urutan default</option>
+                <option value="az">A → Z</option>
+                <option value="za">Z → A</option>
+                <option value="popular">Paling dibuka</option>
+            </select>
         </div>
     </header>
 
     <main class="page">
+        <div id="continueBanner" class="continue-banner" hidden></div>
+        <div id="updateBanner" class="update-banner" hidden></div>
         <div class="section-head">
             <h2 class="section-title" id="sectionTitle">Rilis terbaru</h2>
             <p class="section-sub" id="sectionSub" hidden></p>
         </div>
         <div id="results" class="grid" aria-live="polite"></div>
     </main>
+
+    <div id="adminPanel" class="admin-panel" hidden></div>
 
     <div id="modal" class="modal" role="dialog" aria-modal="true">
         <div class="sheet">
@@ -103,5 +130,6 @@
     </footer>
 
     <script src="script.js"></script>
+    <script src="nk-features.js"></script>
 </body>
 </html>
