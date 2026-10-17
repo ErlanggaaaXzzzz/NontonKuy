@@ -599,6 +599,7 @@ const TAB_SOURCES = {
     zanix: ['zanix'],
     oploverz: ['oploverz'],
     komikcast: ['komikcast'],
+    manga_all: ['ruangkomik', 'komikcast'],
     ruangkomik: ['ruangkomik'],
     nontonime: ['nontonime'],
     anime: ['nontonime', 'oploverz', 'zanix', 'anichin', 'otakudesu'],
@@ -636,7 +637,7 @@ function failedNote(failed) {
     return `<div class="note">Belum merespons: ${escapeHtml(failed.join(', '))}</div>`;
 }
 
-const TAB_LABELS = { all: 'Semua', anilist: 'Katalog', youtube: 'Resmi', zanix: 'Zanix', oploverz: 'Oploverz', komikcast: 'Komikcast', nontonime: 'Nontonime', ruangkomik: 'RuangKomik', anime: 'Anime', hentai: 'Hentai', videos: 'Video', otakudesu: 'OtakuDesu', anichin: 'Anichin', xanimu: 'XAnimu' };
+const TAB_LABELS = { all: 'Semua', anilist: 'Katalog', youtube: 'Resmi', zanix: 'Zanix', oploverz: 'Oploverz', komikcast: 'Komikcast', manga_all: 'Semua Manga', nontonime: 'Nontonime', ruangkomik: 'RuangKomik', anime: 'Anime', hentai: 'Hentai', videos: 'Video', otakudesu: 'OtakuDesu', anichin: 'Anichin', xanimu: 'XAnimu' };
 
 function tabLabel(tab) {
     return TAB_LABELS[tab] || tab;
@@ -936,7 +937,7 @@ function setMode(mode) {
             return;
         }
     }
-    loadTab(mode === 'manga' ? 'ruangkomik' : 'all');
+    loadTab(mode === 'manga' ? 'manga_all' : 'all');
 }
 
 document.querySelectorAll('.mode-btn').forEach(btn => {
