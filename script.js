@@ -9,7 +9,11 @@ const API_ENDPOINTS = {
     anichin: `${API_BASE}/anichin.js`,
     anilist: `${API_BASE}/anilist.js`,
     youtube: `${API_BASE}/youtube.js`,
-    zanix: `${API_BASE}/zanix.js`
+    zanix: `${API_BASE}/zanix.js`,
+    oploverz: `${API_BASE}/oploverz.js`,
+    komikcast: `${API_BASE}/komikcast.js`,
+    nontonime: `${API_BASE}/nontonime.js`,
+    ruangkomik: `${API_BASE}/ruangkomik.js`
 };
 
 const REQUEST_TIMEOUT_MS = 12000;
@@ -103,6 +107,34 @@ async function fetchZanix(action, params = {}) {
     if (result.success) {
         return result.data;
     }
+    return null;
+}
+
+async function fetchOploverz(action, params = {}) {
+    const result = await callAPI(API_ENDPOINTS.oploverz, { action, ...params });
+    if (result.success) {
+        return result.data;
+    }
+    return null;
+}
+
+async function fetchKomikcast(action, params = {}) {
+    const result = await callAPI(API_ENDPOINTS.komikcast, { action, ...params });
+    if (result.success) {
+        return result.data;
+    }
+    return null;
+}
+
+async function fetchNontonime(action, params = {}) {
+    const result = await callAPI(API_ENDPOINTS.nontonime, { action, ...params });
+    if (result.success) return result.data;
+    return null;
+}
+
+async function fetchRuangkomik(action, params = {}) {
+    const result = await callAPI(API_ENDPOINTS.ruangkomik, { action, ...params });
+    if (result.success) return result.data;
     return null;
 }
 
@@ -239,6 +271,18 @@ window.openDetail = async function(encodedLink, source, title, poster) {
             case 'zanix':
                 detailData = await fetchZanix('detail', { query: link });
                 break;
+            case 'oploverz':
+                detailData = await fetchOploverz('detail', { query: link });
+                break;
+            case 'komikcast':
+                detailData = await fetchKomikcast('detail', { query: link });
+                break;
+            case 'ruangkomik':
+                detailData = await fetchRuangkomik('detail', { query: link });
+                break;
+            case 'nontonime':
+                detailData = await fetchNontonime('detail', { query: link });
+                break;
             case 'anilist':
                 detailData = await fetchAniList('detail', { query: link });
                 break;
@@ -362,7 +406,11 @@ const EPISODE_FETCHERS = {
     anichin: (url) => fetchAnichin('episode', { url }),
     hentaimama: (url) => fetchHentaiMama('episode', { url }),
     youtube: (url) => fetchYouTube('episode', { url }),
-    zanix: (url) => fetchZanix('episode', { url })
+    zanix: (url) => fetchZanix('episode', { url }),
+    oploverz: (url) => fetchOploverz('episode', { url }),
+    komikcast: (url) => fetchKomikcast('episode', { url }),
+    ruangkomik: (url) => fetchRuangkomik('episode', { url }),
+    nontonime: (url) => fetchNontonime('episode', { url })
 };
 
 async function openEpisode(source, url, label) {
@@ -374,6 +422,24 @@ async function openEpisode(source, url, label) {
         const result = fetcher ? await fetcher(url) : null;
         const payload = result && result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : result;
         if (!payload) throw new Error('Episode tidak ditemukan');
+
+        // Manga reader: vertical page images
+        if (payload.kind === 'manga' || (Array.isArray(payload.pages) && payload.pages.length > 0)) {
+            const pages = payload.pages || [];
+            let html = `<p class="modal-label">${escapeHtml(payload.title || label)}</p>`;
+            html += `<div class="manga-reader">`;
+            pages.forEach((src, i) => {
+                html += `<img class="manga-page" src="${escapeAttr(src)}" alt="Halaman ${i + 1}" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'">`;
+            });
+            html += `</div>`;
+            if (Array.isArray(payload.watchLinks) && payload.watchLinks.length) {
+                html += `<div class="modal-links">${payload.watchLinks.map(w => `<a href="${escapeAttr(w.url)}" target="_blank" rel="noopener">${escapeHtml(w.label)}</a>`).join('')}</div>`;
+            }
+            area.innerHTML = html;
+            area.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            return;
+        }
+
         const media = collectMedia(payload);
         let html = `<p class="modal-label">${escapeHtml(payload.title || label)}</p>`;
         const player = playerHtml(media, payload.poster || '');
@@ -465,6 +531,10 @@ function extractItems(payload) {
 
 const SOURCES = {
     zanix: { label: 'Zanix', home: (_, page = 1) => fetchZanix('home', { page }), search: (q, page = 1) => fetchZanix('search', { query: q, page }) },
+    oploverz: { label: 'Oploverz', home: (_, page = 1) => fetchOploverz('home', { page }), search: (q, page = 1) => fetchOploverz('search', { query: q, page }) },
+    komikcast: { label: 'Komikcast', home: (_, page = 1) => fetchKomikcast('home', { page }), search: (q, page = 1) => fetchKomikcast('search', { query: q, page }) },
+    ruangkomik: { label: 'RuangKomik', home: (_, page = 1) => fetchRuangkomik('home', { page }), search: (q, page = 1) => fetchRuangkomik('search', { query: q, page }) },
+    nontonime: { label: 'Nontonime', home: (_, page = 1) => fetchNontonime('home', { page }), search: (q, page = 1) => fetchNontonime('search', { query: q, page }) },
     youtube: { label: 'YouTube', home: (_, page = 1) => fetchYouTube('home', { page }), search: (q, page = 1) => fetchYouTube('search', { query: q, page }) },
     anilist: { label: 'AniList', home: (_, page = 1) => fetchAniList('home', { page }), search: (q, page = 1) => fetchAniList('search', { query: q, page }) },
     anichin: { label: 'Anichin', home: (_, page = 1) => fetchAnichin('home', { page }), search: (q, page = 1) => fetchAnichin('search', { query: q, page }) },
@@ -475,11 +545,15 @@ const SOURCES = {
 };
 
 const TAB_SOURCES = {
-    all: ['zanix', 'anilist', 'anichin', 'otakudesu', 'xanimu', 'hentaimama', 'rule34video'],
+    all: ['nontonime', 'oploverz', 'zanix', 'anilist', 'anichin', 'otakudesu', 'xanimu', 'hentaimama', 'rule34video'],
     anilist: ['anilist'],
     youtube: ['youtube'],
     zanix: ['zanix'],
-    anime: ['zanix', 'anichin', 'otakudesu'],
+    oploverz: ['oploverz'],
+    komikcast: ['komikcast'],
+    ruangkomik: ['ruangkomik'],
+    nontonime: ['nontonime'],
+    anime: ['nontonime', 'oploverz', 'zanix', 'anichin', 'otakudesu'],
     hentai: ['hentaimama'],
     videos: ['rule34video'],
     otakudesu: ['otakudesu'],
@@ -514,7 +588,7 @@ function failedNote(failed) {
     return `<div class="note">Belum merespons: ${escapeHtml(failed.join(', '))}</div>`;
 }
 
-const TAB_LABELS = { all: 'Semua', anilist: 'Katalog', youtube: 'Resmi', zanix: 'Zanix', anime: 'Anime', hentai: 'Hentai', videos: 'Video', otakudesu: 'OtakuDesu', anichin: 'Anichin', xanimu: 'XAnimu' };
+const TAB_LABELS = { all: 'Semua', anilist: 'Katalog', youtube: 'Resmi', zanix: 'Zanix', oploverz: 'Oploverz', komikcast: 'Komikcast', nontonime: 'Nontonime', ruangkomik: 'RuangKomik', anime: 'Anime', hentai: 'Hentai', videos: 'Video', otakudesu: 'OtakuDesu', anichin: 'Anichin', xanimu: 'XAnimu' };
 
 function tabLabel(tab) {
     return TAB_LABELS[tab] || tab;
@@ -601,9 +675,39 @@ async function loadTab(tab) {
     await runList(keys, 'home', null, tab === 'all' ? 'Rilis terbaru' : 'Terbaru di ' + tabLabel(tab));
 }
 
+let currentMode = 'anime';
+const animeTabs = document.getElementById('animeTabs');
+const mangaTabs = document.getElementById('mangaTabs');
+
+function setMode(mode) {
+    currentMode = mode;
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+    if (animeTabs) animeTabs.classList.toggle('hidden', mode !== 'anime');
+    if (mangaTabs) mangaTabs.classList.toggle('hidden', mode !== 'manga');
+    searchInput.placeholder = mode === 'manga'
+        ? 'Cari judul manga, manhwa, manhua…'
+        : 'Cari judul anime atau video…';
+    const tabsRoot = mode === 'manga' ? mangaTabs : animeTabs;
+    if (tabsRoot) {
+        tabsRoot.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        const first = tabsRoot.querySelector('.tab-btn');
+        if (first) {
+            first.classList.add('active');
+            loadTab(first.dataset.tab);
+            return;
+        }
+    }
+    loadTab(mode === 'manga' ? 'ruangkomik' : 'all');
+}
+
+document.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => setMode(btn.dataset.mode));
+});
+
 document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        const parent = btn.closest('.tabs');
+        if (parent) parent.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         loadTab(btn.dataset.tab);
     });

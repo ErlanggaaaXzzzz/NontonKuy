@@ -5,24 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#08090D">
     <meta name="color-scheme" content="dark">
-    <meta name="description" content="NontonKuy — streaming anime catalog">
+    <meta name="description" content="NontonKuy — nonton anime & baca manga">
     <title>NontonKuy</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <header class="topbar">
         <div class="topbar-inner">
             <a class="brand" href="/">Nonton<b>Kuy</b></a>
+            <div class="mode-switch" role="tablist" aria-label="Mode">
+                <button type="button" class="mode-btn active" data-mode="anime" id="modeAnime">Anime</button>
+                <button type="button" class="mode-btn" data-mode="manga" id="modeManga">Manga</button>
+            </div>
             <form class="search" id="searchForm" role="search" onsubmit="return false">
                 <input type="search" id="searchInput" placeholder="Cari judul anime atau video…" autocomplete="off" enterkeyhint="search" aria-label="Cari judul">
                 <button type="button" id="searchBtn" aria-label="Cari">Cari</button>
             </form>
         </div>
-        <nav class="tabs" aria-label="Kategori">
+        <nav class="tabs" id="animeTabs" aria-label="Kategori anime">
             <button class="tab-btn active" data-tab="all">Semua</button>
+            <button class="tab-btn" data-tab="nontonime">Nontonime</button>
+            <button class="tab-btn" data-tab="oploverz">Oploverz</button>
             <button class="tab-btn" data-tab="zanix">Zanix</button>
             <button class="tab-btn" data-tab="anilist">Katalog</button>
             <button class="tab-btn" data-tab="anime">Anime</button>
@@ -31,6 +37,10 @@
             <button class="tab-btn" data-tab="otakudesu">OtakuDesu</button>
             <button class="tab-btn" data-tab="anichin">Anichin</button>
             <button class="tab-btn" data-tab="xanimu">XAnimu</button>
+        </nav>
+        <nav class="tabs hidden" id="mangaTabs" aria-label="Kategori manga">
+            <button class="tab-btn active" data-tab="ruangkomik">RuangKomik</button>
+            <button class="tab-btn" data-tab="komikcast">Komikcast</button>
         </nav>
     </header>
 

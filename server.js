@@ -25,6 +25,10 @@ const anichin = require('./lib/otakudesu');
 const AniListScraper = require('./lib/anilist');
 const YouTubeScraper = require('./lib/youtube');
 const ZanixScraper = require('./lib/zanix');
+const OploverzScraper = require('./lib/oploverz');
+const KomikcastScraper = require('./lib/komikcast');
+const NontonimeScraper = require('./lib/nontonime');
+const RuangkomikScraper = require('./lib/ruangkomik');
 
 const parsePage = (value) => parseInt(value, 10) || 1;
 
@@ -76,6 +80,58 @@ app.get('/api/otakudesu.js', animeRoute(otakudesu));
 app.get('/api/anichin.js', animeRoute(anichin));
 app.get('/api/anilist.js', animeRoute(AniListScraper));
 app.get('/api/youtube.js', animeRoute(YouTubeScraper));
+app.get('/api/nontonime.js', respondWith(async (req) => {
+    const scraper = new NontonimeScraper();
+    const { action, query, page, url } = req.query;
+    switch (action) {
+        case 'episode':
+            if (!url) throw new Error('URL episode tidak valid');
+            return scraper.episode(String(url));
+        case 'search': return scraper.search(query, parsePage(page));
+        case 'detail': return scraper.detail(query);
+        case 'ongoing': return scraper.ongoing(parsePage(page));
+        default: return scraper.home(parsePage(page));
+    }
+}));
+app.get('/api/ruangkomik.js', respondWith(async (req) => {
+    const scraper = new RuangkomikScraper();
+    const { action, query, page, url } = req.query;
+    switch (action) {
+        case 'episode':
+            if (!url) throw new Error('Chapter tidak valid');
+            return scraper.episode(String(url));
+        case 'search': return scraper.search(query, parsePage(page));
+        case 'detail': return scraper.detail(query);
+        case 'ongoing': return scraper.ongoing(parsePage(page));
+        default: return scraper.home(parsePage(page));
+    }
+}));
+app.get('/api/komikcast.js', respondWith(async (req) => {
+    const scraper = new KomikcastScraper();
+    const { action, query, page, url } = req.query;
+    switch (action) {
+        case 'episode':
+            if (!url) throw new Error('Chapter tidak valid');
+            return scraper.episode(String(url));
+        case 'search': return scraper.search(query, parsePage(page));
+        case 'detail': return scraper.detail(query);
+        case 'ongoing': return scraper.ongoing(parsePage(page));
+        default: return scraper.home(parsePage(page));
+    }
+}));
+app.get('/api/oploverz.js', respondWith(async (req) => {
+    const scraper = new OploverzScraper();
+    const { action, query, page, url } = req.query;
+    switch (action) {
+        case 'episode':
+            if (!url) throw new Error('URL episode tidak valid');
+            return scraper.episode(String(url));
+        case 'search': return scraper.search(query, parsePage(page));
+        case 'detail': return scraper.detail(query);
+        case 'ongoing': return scraper.ongoing(parsePage(page));
+        default: return scraper.home(parsePage(page));
+    }
+}));
 app.get('/api/zanix.js', respondWith(async (req) => {
     const scraper = new ZanixScraper();
     const { action, query, page, url } = req.query;
