@@ -196,7 +196,8 @@ async function submitCaptcha(answer) {
         sessionStorage.setItem('nk_access_token', nkAccessToken);
         nkCaptchaReady = true;
         hideCaptchaGate();
-        if (typeof loadTab === 'function') loadTab(typeof currentTab !== 'undefined' ? currentTab : 'all');
+        if (captchaWaiters.length) releaseCaptchaWaiters();
+        else if (typeof loadTab === 'function') loadTab(typeof currentTab !== 'undefined' ? currentTab : 'all');
         return true;
     } catch (e) {
         if (err) {
@@ -235,52 +236,96 @@ const modalClose = document.querySelector('.modal-close');
 const clientCache = new Map();
 const CLIENT_CACHE_TTL = 3 * 60 * 1000;
 
+const captchaWaiters = [];
+function waitForCaptcha(maxMs = 180000) {
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(false), maxMs);
+        captchaWaiters.push(() => { clearTimeout(timer); resolve(true); });
+    });
+}
+function releaseCaptchaWaiters() {
+    while (captchaWaiters.length) captchaWaiters.shift()();
+}
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function callAPI(endpoint, params = {}) {
     const startTime = performance.now();
-    try {
-        const url = new URL(endpoint);
-        Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
-        const cacheKey = url.toString();
-        const hit = clientCache.get(cacheKey);
-        if (hit && Date.now() < hit.exp) {
-            return { success: true, data: hit.data, latency: 0, cached: true };
-        }
+    const url = new URL(endpoint);
+    Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
+    const cacheKey = url.toString();
+    const hit = clientCache.get(cacheKey);
+    if (hit && Date.now() < hit.exp) {
+        return { success: true, data: hit.data, latency: 0, cached: true };
+    }
+
+    let message = 'Gagal memuat';
+    let retried = 0;
+    let captchaRetried = false;
+    for (let attempt = 0; attempt < 4; attempt++) {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-        let response;
         try {
             const headers = {};
             if (nkAccessToken) headers['X-NK-Token'] = nkAccessToken;
             if (nkFingerprint) headers['X-FP'] = nkFingerprint;
             headers['X-NK-Nonce'] = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
-            response = await fetch(url, { signal: controller.signal, headers });
-            if (response.status === 403) {
-                try {
-                    const body = await response.clone().json();
-                    if (body && body.code === 'CAPTCHA_REQUIRED') {
-                        nkAccessToken = '';
-                        sessionStorage.removeItem('nk_access_token');
-                        showCaptchaGate();
-                    }
-                } catch (_) {}
+            const response = await fetch(url, { signal: controller.signal, headers });
+
+            // server memperpanjang sesi otomatis selama user aktif
+            const fresh = response.headers.get('X-NK-Token');
+            if (fresh) {
+                nkAccessToken = fresh;
+                try { sessionStorage.setItem('nk_access_token', fresh); } catch (_) {}
             }
+
+            let body = null;
+            if (!response.ok) body = await response.clone().json().catch(() => null);
+
+            if (response.status === 403 && body && body.code === 'CAPTCHA_REQUIRED') {
+                nkAccessToken = '';
+                try { sessionStorage.removeItem('nk_access_token'); } catch (_) {}
+                showCaptchaGate();
+                message = 'Verifikasi keamanan diperlukan';
+                // tunggu user selesai verifikasi, lalu ulangi permintaan yang sama
+                if (!captchaRetried && await waitForCaptcha()) {
+                    captchaRetried = true;
+                    continue;
+                }
+                break;
+            }
+
+            if (!response.ok) {
+                message = `HTTP ${response.status}${body && body.error ? ': ' + body.error : ''}`;
+                const transient = response.status >= 500 || response.status === 429;
+                if (transient && retried < 1) {
+                    retried++;
+                    await sleep(response.status === 429 ? 1500 : 700);
+                    continue;
+                }
+                break;
+            }
+
+            const data = await response.json();
+            clientCache.set(cacheKey, { data, exp: Date.now() + CLIENT_CACHE_TTL });
+            if (clientCache.size > 80) {
+                const k = clientCache.keys().next().value;
+                clientCache.delete(k);
+            }
+            return { success: true, data, latency: Math.round(performance.now() - startTime) };
+        } catch (error) {
+            message = error.name === 'AbortError' ? 'Timeout — sumber lambat/tidak merespons' : (error.message || 'Koneksi gagal');
+            if (retried < 1) {
+                retried++;
+                await sleep(600);
+                continue;
+            }
+            break;
         } finally {
             clearTimeout(timer);
         }
-        if (!response.ok) throw new Error('HTTP ' + response.status);
-        const data = await response.json();
-        clientCache.set(cacheKey, { data, exp: Date.now() + CLIENT_CACHE_TTL });
-        if (clientCache.size > 80) {
-            const k = clientCache.keys().next().value;
-            clientCache.delete(k);
-        }
-        const latency = Math.round(performance.now() - startTime);
-        return { success: true, data, latency };
-    } catch (error) {
-        const latency = Math.round(performance.now() - startTime);
-        const msg = error.name === 'AbortError' ? 'Timeout — sumber lambat/tidak merespons' : error.message;
-        return { success: false, error: msg, latency };
     }
+    window.__nkLastApiError = message;
+    return { success: false, error: message, latency: Math.round(performance.now() - startTime) };
 }
 
 
@@ -445,7 +490,7 @@ function renderResults(items, fallbackSource) {
 
     resultsEl.innerHTML = renderedItems.map((item, index) => {
         const title = item.title || item.name || 'Untitled';
-        const poster = item.poster || item.image || item.thumbnail || item.img || '';
+        const poster = item.poster || item.image || item.thumbnail || item.img || item.cover || item.thumb || '';
         const sourceLabel = item.source || fallbackSource || 'Unknown';
         const sourceClass = String(sourceLabel).toLowerCase().replace(/[^a-z0-9]/g, '');
         const badgeText = item.episode ? `Eps ${item.episode}` : (item.status || item.duration || '');
@@ -702,6 +747,7 @@ async function openEpisode(source, url, label) {
     const area = document.getElementById('episodeArea');
     if (!area) return;
     area.innerHTML = `<p class="modal-description">Memuat ${escapeHtml(label)}...</p>`;
+    window.__nkLastApiError = '';
     const fetcher = EPISODE_FETCHERS[String(source).toLowerCase()];
     try {
         const result = fetcher ? await fetcher(url) : null;
@@ -716,7 +762,7 @@ async function openEpisode(source, url, label) {
             });
         } catch (_) {}
         const payload = result && result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : result;
-        if (!payload) throw new Error('Episode tidak ditemukan');
+        if (!payload) throw new Error(window.__nkLastApiError || 'Episode tidak ditemukan');
 
         // Manga reader: vertical page images + toolbar
         if (payload.kind === 'manga' || (Array.isArray(payload.pages) && payload.pages.length > 0)) {

@@ -235,34 +235,65 @@ const sniffImageType = (buf) => {
     return '';
 };
 
-const fetchImage = async (href, hop = 0, noReferer = false) => {
+const refererCandidates = (target) => {
+    const list = [target.origin + '/'];
+    const parts = target.hostname.split('.');
+    if (parts.length > 2) {
+        const root = parts.slice(-2).join('.');
+        list.push(`${target.protocol}//${root}/`, `${target.protocol}//www.${root}/`);
+    }
+    list.push('');
+    return list;
+};
+
+const fetchImage = async (href, hop = 0, deadline = Date.now() + 9000) => {
     const target = new URL(href);
     if (target.protocol !== 'http:' && target.protocol !== 'https:') throw new Error('protocol');
     const { address } = await dns.lookup(target.hostname);
     if (isPrivateAddress(address)) throw new Error('private');
-    const headers = {
-        'User-Agent': IMG_UA,
-        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
-    };
-    if (!noReferer) headers.Referer = target.origin + '/';
-    const upstream = await axios.get(target.href, {
-        responseType: 'arraybuffer',
-        timeout: 12000,
-        maxContentLength: 8 * 1024 * 1024,
-        maxRedirects: 0,
-        validateStatus: () => true,
-        headers
-    });
-    if (upstream.status >= 300 && upstream.status < 400 && upstream.headers.location && hop < 4) {
-        return fetchImage(new URL(upstream.headers.location, target).href, hop + 1, noReferer);
+    let lastError = new Error('gagal');
+    let networkFails = 0;
+    for (const referer of refererCandidates(target)) {
+        const left = deadline - Date.now();
+        if (left < 800) break;
+        const headers = {
+            'User-Agent': IMG_UA,
+            Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
+        };
+        if (referer) headers.Referer = referer;
+        let upstream;
+        try {
+            upstream = await axios.get(target.href, {
+                responseType: 'arraybuffer',
+                timeout: Math.min(6000, left),
+                maxContentLength: 8 * 1024 * 1024,
+                maxRedirects: 0,
+                validateStatus: () => true,
+                headers
+            });
+        } catch (e) {
+            lastError = e;
+            if (++networkFails >= 2) break;
+            continue;
+        }
+        if (upstream.status >= 300 && upstream.status < 400 && upstream.headers.location && hop < 4) {
+            return fetchImage(new URL(upstream.headers.location, target).href, hop + 1, deadline);
+        }
+        if (upstream.status >= 400) {
+            lastError = new Error('upstream ' + upstream.status);
+            if ([401, 403, 404, 406, 429].includes(upstream.status) || upstream.status >= 500) continue;
+            break;
+        }
+        const buf = Buffer.from(upstream.data);
+        let type = String(upstream.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+        if (!type.startsWith('image/')) type = sniffImageType(buf);
+        if (!type) {
+            lastError = new Error('bukan gambar');
+            continue;
+        }
+        return { buf, type };
     }
-    if (upstream.status === 403 && !noReferer) return fetchImage(href, hop, true);
-    if (upstream.status >= 400) throw new Error('upstream ' + upstream.status);
-    const buf = Buffer.from(upstream.data);
-    let type = String(upstream.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
-    if (!type.startsWith('image/')) type = sniffImageType(buf);
-    if (!type) throw new Error('bukan gambar');
-    return { buf, type };
+    throw lastError;
 };
 
 async function imageProxy(req, res) {
