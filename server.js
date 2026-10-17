@@ -12,11 +12,28 @@ const dns = require('dns').promises;
 const net = require('net');
 const axios = require('axios');
 
+
+const imageHits = new Map();
+function imageRateLimit(req, res, next) {
+    const ip = String(req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
+    const now = Date.now();
+    const recent = (imageHits.get(ip) || []).filter((t) => now - t < 60000);
+    if (recent.length >= 400) return res.status(429).end();
+    recent.push(now);
+    imageHits.set(ip, recent);
+    if (imageHits.size > 5000) imageHits.clear();
+    next();
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+
+// Proxy gambar dipasang SEBELUM shield: tag <img> tidak bisa kirim token,
+// dan tiap thumbnail tidak boleh menghabiskan jatah rate-limit API.
+app.get('/api/img', imageRateLimit, (req, res) => imageProxy(req, res));
 
 const shield = require('./lib/shield');
 shield.registerRoutes(app);
@@ -33,6 +50,8 @@ const OploverzScraper = require('./lib/oploverz');
 const KomikcastScraper = require('./lib/komikcast');
 const NontonimeScraper = require('./lib/nontonime');
 const RuangkomikScraper = require('./lib/ruangkomik');
+
+const { normalizeImages } = require('./lib/imgutil');
 
 const parsePage = (value) => parseInt(value, 10) || 1;
 
@@ -74,7 +93,7 @@ const respondWithCached = (task) => async (req, res) => {
         }
     }
     try {
-        const data = await task(req);
+        const data = normalizeImages(await task(req));
         if (!skip) setCache(key, data);
         res.set('X-Cache', 'MISS');
         res.json(data);
@@ -203,32 +222,63 @@ const isPrivateAddress = (address) => {
     return lower === '::1' || lower === '::' || lower.startsWith('fc') || lower.startsWith('fd') || lower.startsWith('fe80');
 };
 
-app.get('/api/img', async (req, res) => {
+const IMG_UA = 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
+
+const sniffImageType = (buf) => {
+    if (!buf || buf.length < 12) return '';
+    if (buf[0] === 0xff && buf[1] === 0xd8) return 'image/jpeg';
+    if (buf[0] === 0x89 && buf.toString('ascii', 1, 4) === 'PNG') return 'image/png';
+    if (buf.toString('ascii', 0, 3) === 'GIF') return 'image/gif';
+    if (buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+    if (buf.toString('ascii', 4, 8) === 'ftyp' && /avif|avis/.test(buf.toString('ascii', 8, 16))) return 'image/avif';
+    if (/^\s*(<\?xml|<svg)/i.test(buf.toString('utf8', 0, 64))) return 'image/svg+xml';
+    return '';
+};
+
+const fetchImage = async (href, hop = 0, noReferer = false) => {
+    const target = new URL(href);
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') throw new Error('protocol');
+    const { address } = await dns.lookup(target.hostname);
+    if (isPrivateAddress(address)) throw new Error('private');
+    const headers = {
+        'User-Agent': IMG_UA,
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
+    };
+    if (!noReferer) headers.Referer = target.origin + '/';
+    const upstream = await axios.get(target.href, {
+        responseType: 'arraybuffer',
+        timeout: 12000,
+        maxContentLength: 8 * 1024 * 1024,
+        maxRedirects: 0,
+        validateStatus: () => true,
+        headers
+    });
+    if (upstream.status >= 300 && upstream.status < 400 && upstream.headers.location && hop < 4) {
+        return fetchImage(new URL(upstream.headers.location, target).href, hop + 1, noReferer);
+    }
+    if (upstream.status === 403 && !noReferer) return fetchImage(href, hop, true);
+    if (upstream.status >= 400) throw new Error('upstream ' + upstream.status);
+    const buf = Buffer.from(upstream.data);
+    let type = String(upstream.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    if (!type.startsWith('image/')) type = sniffImageType(buf);
+    if (!type) throw new Error('bukan gambar');
+    return { buf, type };
+};
+
+async function imageProxy(req, res) {
     try {
-        const target = new URL(String(req.query.u || ''));
-        if (target.protocol !== 'http:' && target.protocol !== 'https:') return res.status(400).end();
-        const { address } = await dns.lookup(target.hostname);
-        if (isPrivateAddress(address)) return res.status(400).end();
-        const upstream = await axios.get(target.href, {
-            responseType: 'arraybuffer',
-            timeout: 8000,
-            maxContentLength: 4 * 1024 * 1024,
-            maxRedirects: 0,
-            headers: {
-                Referer: target.origin + '/',
-                'User-Agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
-                Accept: 'image/avif,image/webp,image/*,*/*;q=0.8'
-            }
-        });
-        const type = String(upstream.headers['content-type'] || '');
-        if (!type.startsWith('image/')) return res.status(415).end();
+        const { buf, type } = await fetchImage(String(req.query.u || ''));
         res.set('Content-Type', type);
-        res.set('Cache-Control', 'public, max-age=86400, s-maxage=86400');
-        res.send(Buffer.from(upstream.data));
+        res.set('Cache-Control', 'public, max-age=604800, s-maxage=604800, stale-while-revalidate=86400');
+        res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+        res.set('X-Content-Type-Options', 'nosniff');
+        if (type === 'image/svg+xml') res.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
+        res.send(buf);
     } catch (e) {
+        res.set('Cache-Control', 'no-store');
         res.status(502).end();
     }
-});
+}
 
 const translateRequests = new Map();
 
@@ -300,6 +350,7 @@ app.get('/sw.js', (req, res) => {
     res.sendFile(path.join(__dirname, 'sw.js'));
 });
 app.get('/icon.svg', (req, res) => res.sendFile(path.join(__dirname, 'icon.svg')));
+app.get('/miniplayer.js', (req, res) => res.sendFile(path.join(__dirname, 'miniplayer.js')));
 app.get('/nk-features.js', (req, res) => res.sendFile(path.join(__dirname, 'nk-features.js')));
 
 if (require.main === module) {

@@ -390,10 +390,25 @@ window.PLACEHOLDER_IMAGE = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg
 
 function proxiedImage(url) {
     if (!url) return '';
+    url = String(url).trim().replace(/&amp;/g, '&');
     if (url.startsWith('//')) url = 'https:' + url;
+    // placeholder lazy-load (gif/base64 kecil) bukan gambar asli
+    if (/^data:/i.test(url) && url.length < 800) return window.PLACEHOLDER_IMAGE;
     if (/^https?:\/\//i.test(url)) return `${API_BASE}/img?u=${encodeURIComponent(url)}`;
     return url;
 }
+
+// Gambar gagal dimuat: coba ulang sekali (cache-bust), baru pakai placeholder
+window.nkImgFallback = function (img) {
+    if (!img.dataset.retry && /\/api\/img\?/.test(img.src)) {
+        img.dataset.retry = '1';
+        const src = img.src;
+        setTimeout(() => { img.src = src + (src.includes('&r=') ? '' : '&r=1'); }, 700);
+        return;
+    }
+    img.onerror = null;
+    img.src = window.PLACEHOLDER_IMAGE;
+};
 
 function escapeAttr(text) {
     return String(text == null ? '' : text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -437,7 +452,7 @@ function renderResults(items, fallbackSource) {
         const key = storageKey(item);
         const starred = isInWatchlist(key);
         const imageHtml = poster
-            ? `<img src="${escapeAttr(proxiedImage(poster))}" alt="${escapeAttr(title)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src=window.PLACEHOLDER_IMAGE">`
+            ? `<img src="${escapeAttr(proxiedImage(poster))}" alt="${escapeAttr(title)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="nkImgFallback(this)">`
             : `<img src="${window.PLACEHOLDER_IMAGE}" alt="${escapeAttr(title)}">`;
 
         return `
@@ -500,6 +515,7 @@ function escapeHtml(text) {
 
 window.openDetail = async function(encodedLink, source, title, poster) {
     const link = decodeURIComponent(encodedLink);
+    window.__nkDetailMeta = { link, source, title, poster };
     modal.classList.add('active');
 
     modalBody.innerHTML = `<p class="modal-description">Memuat detail...</p>`;
@@ -640,10 +656,11 @@ function playerHtml(media, posterUrl) {
 
 function swapPlayer(container, kind, src) {
     const holder = container.querySelector('#detailPlayer, #detailEmbed');
-    if (!holder) return;
+    if (!holder && !(window.NKMini && window.NKMini.owns(container))) return;
     const element = document.createElement(kind === 'video' ? 'video' : 'iframe');
     element.id = kind === 'video' ? 'detailPlayer' : 'detailEmbed';
     element.setAttribute('referrerpolicy', kind === 'video' ? 'no-referrer' : embedReferrerPolicy(src));
+    const docked = window.NKMini && window.NKMini.owns(container);
     if (kind === 'video') {
         element.controls = true;
         element.setAttribute('playsinline', '');
@@ -653,7 +670,8 @@ function swapPlayer(container, kind, src) {
         element.setAttribute('allow', IFRAME_ALLOW);
         element.src = src;
     }
-    holder.replaceWith(element);
+    if (docked) window.NKMini.replaceElement(element);
+    else holder.replaceWith(element);
     if (kind === 'video') element.play().catch(() => {});
 }
 
@@ -791,6 +809,10 @@ async function openEpisode(source, url, label) {
             html += `<p class="modal-label">Unduh</p><div class="modal-links">${media.downloads.map(d => `<a href="${escapeAttr(d.url)}" target="_blank" rel="noopener">${escapeHtml(d.label)}</a>`).join('')}</div>`;
         }
         area.innerHTML = html;
+        if (window.NKMini && player) {
+            const meta = window.__nkDetailMeta || {};
+            window.NKMini.adopt(area, { ...meta, title: `${meta.playerTitle || meta.title || ''} — ${label}`.replace(/^ — /, ''), force: true });
+        }
         bindPlayerButtons(area);
         area.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch (e) {
@@ -818,7 +840,7 @@ function renderDetail(data, source, poster) {
     if (!isYoutubeSource && player) {
         html += `<div id="mainPlayer">${player}</div>`;
     } else if (posterUrl) {
-        html += `<img src="${escapeAttr(proxiedImage(posterUrl))}" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src=window.PLACEHOLDER_IMAGE" />`;
+        html += `<img src="${escapeAttr(proxiedImage(posterUrl))}" referrerpolicy="no-referrer" onerror="nkImgFallback(this)" />`;
     }
     if (description) html += `<p class="modal-description">${escapeHtml(description)}</p>`;
 
@@ -850,6 +872,11 @@ function renderDetail(data, source, poster) {
 
     modalBody.innerHTML = html;
 
+    const base = window.__nkDetailMeta || {};
+    window.__nkDetailMeta = { link: base.link || payload.url || '', source, title: base.title || title, poster: posterUrl, key: `${source}::${title}`, playerTitle: title };
+    if (window.NKMini && modalBody.querySelector('#mainPlayer')) {
+        window.NKMini.adopt(modalBody.querySelector('#mainPlayer'), { ...window.__nkDetailMeta, title });
+    }
     const main = modalBody.querySelector('#mainPlayer');
     if (main) bindPlayerButtons(main);
     modalBody.querySelectorAll('a[data-episode]').forEach(anchor => {
@@ -1261,12 +1288,16 @@ searchInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') searchBtn.click();
 });
 
-modalClose.addEventListener('click', () => modal.classList.remove('active'));
+function closeModal() {
+    modal.classList.remove('active');
+    if (window.NKMini) window.NKMini.onModalClose();
+}
+modalClose.addEventListener('click', closeModal);
 document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') modal.classList.remove('active');
+    if (e.key === 'Escape') closeModal();
 });
 modal.addEventListener('click', (e) => {
-    if (e.target === modal) modal.classList.remove('active');
+    if (e.target === modal) closeModal();
 });
 
 initTheme();

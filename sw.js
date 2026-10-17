@@ -1,5 +1,5 @@
-const CACHE = 'nontonkuy-v1';
-const ASSETS = ['/', '/index.html', '/style.css', '/script.js', '/manifest.webmanifest', '/icon.svg'];
+const CACHE = 'nontonkuy-v2';
+const ASSETS = ['/', '/index.html', '/style.css', '/script.js', '/miniplayer.js', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
