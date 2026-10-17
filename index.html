@@ -19,8 +19,10 @@
 <body>
     <div id="captchaGate" class="captcha-gate" hidden>
         <div class="captcha-card">
-            <h2>Verifikasi singkat</h2>
-            <p>Selesaikan soal ini untuk lanjut memakai NontonKuy. Ini membantu mengurangi bot dan scraper.</p>
+            <h2>Verifikasi keamanan</h2>
+            <p>Perlindungan anti-bot aktif. Selesaikan langkah singkat ini untuk melanjutkan. Bot dan scraper akan dipersulit.</p>
+            <p class="captcha-status" id="captchaStatus">Menyiapkan tantangan…</p>
+            <div id="turnstileBox" class="turnstile-box"></div>
             <p class="captcha-q" id="captchaQuestion">Memuat soal…</p>
             <form id="captchaForm" class="captcha-form" autocomplete="off">
                 <input type="number" id="captchaAnswer" inputmode="numeric" placeholder="Jawaban" required>

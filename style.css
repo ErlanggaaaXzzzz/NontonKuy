@@ -1338,3 +1338,12 @@ html[data-theme="light"] body {
   color: #f87171 !important;
   margin-top: 10px !important;
 }
+
+.captcha-status {
+  font-size: 0.85rem !important;
+  color: var(--text-3) !important;
+}
+.turnstile-box {
+  margin: 10px 0;
+  min-height: 0;
+}

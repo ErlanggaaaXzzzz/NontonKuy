@@ -17,23 +17,85 @@ const API_ENDPOINTS = {
 };
 
 
-/* ——— CAPTCHA / session token ——— */
+/* ——— CAPTCHA / multi-layer shield ——— */
 let nkAccessToken = sessionStorage.getItem('nk_access_token') || '';
 let nkCaptchaReady = false;
+let nkFingerprint = sessionStorage.getItem('nk_fp') || '';
+let nkChallengeStartedAt = 0;
+let nkPowTicket = null;
 
-async function ensureCaptcha() {
-    if (nkAccessToken) {
-        nkCaptchaReady = true;
-        hideCaptchaGate();
-        return true;
+async function sha256Hex(text) {
+    const data = new TextEncoder().encode(text);
+    const buf = await crypto.subtle.digest('SHA-256', data);
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function solvePow(salt, difficulty, onProgress) {
+    let nonce = 0;
+    const prefix = '0'.repeat(Number(difficulty) || 4);
+    // cap work to avoid infinite hang
+    const max = difficulty >= 6 ? 5_000_000 : 2_000_000;
+    while (nonce < max) {
+        const hex = await sha256Hex(String(salt) + String(nonce));
+        if (hex.startsWith(prefix)) return String(nonce);
+        nonce++;
+        if (onProgress && nonce % 500 === 0) onProgress(nonce);
+        // yield to UI
+        if (nonce % 200 === 0) await new Promise((r) => setTimeout(r, 0));
     }
-    showCaptchaGate();
-    return false;
+    throw new Error('Proof-of-Work terlalu lama. Muat ulang.');
+}
+
+function collectFingerprint() {
+    try {
+        const parts = [
+            navigator.userAgent || '',
+            navigator.language || '',
+            String(screen.width) + 'x' + String(screen.height),
+            String(screen.colorDepth || ''),
+            String(new Date().getTimezoneOffset()),
+            String(navigator.hardwareConcurrency || ''),
+            String(navigator.deviceMemory || ''),
+            String(navigator.maxTouchPoints || 0),
+            String(!!window.chrome),
+            String(navigator.webdriver === true)
+        ];
+        // canvas snippet
+        try {
+            const c = document.createElement('canvas');
+            c.width = 120; c.height = 40;
+            const ctx = c.getContext('2d');
+            ctx.textBaseline = 'top';
+            ctx.font = '14px Arial';
+            ctx.fillStyle = '#f60';
+            ctx.fillRect(0, 0, 120, 40);
+            ctx.fillStyle = '#069';
+            ctx.fillText('nk-fp', 4, 10);
+            parts.push(c.toDataURL().slice(-64));
+        } catch (_) {}
+        // webgl
+        try {
+            const c = document.createElement('canvas');
+            const gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+            if (gl) {
+                const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+                if (dbg) parts.push(String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || ''));
+            }
+        } catch (_) {}
+        const raw = parts.join('|');
+        // simple djb2
+        let h = 5381;
+        for (let i = 0; i < raw.length; i++) h = ((h << 5) + h) ^ raw.charCodeAt(i);
+        return (h >>> 0).toString(16) + '-' + String(raw.length);
+    } catch (_) {
+        return 'fp-' + Math.random().toString(16).slice(2);
+    }
 }
 
 function showCaptchaGate() {
     const gate = document.getElementById('captchaGate');
     if (gate) gate.hidden = false;
+    nkChallengeStartedAt = Date.now();
     loadCaptchaChallenge();
 }
 
@@ -45,8 +107,14 @@ function hideCaptchaGate() {
 async function loadCaptchaChallenge() {
     const q = document.getElementById('captchaQuestion');
     const err = document.getElementById('captchaError');
+    const status = document.getElementById('captchaStatus');
     if (err) err.hidden = true;
+    if (status) status.textContent = 'Menyiapkan tantangan…';
     try {
+        if (!nkFingerprint) {
+            nkFingerprint = collectFingerprint();
+            sessionStorage.setItem('nk_fp', nkFingerprint);
+        }
         const res = await fetch(API_BASE + '/captcha');
         const data = await res.json();
         if (data.disabled && data.token) {
@@ -57,13 +125,27 @@ async function loadCaptchaChallenge() {
             if (typeof loadTab === 'function') loadTab(typeof currentTab !== 'undefined' ? currentTab : 'all');
             return;
         }
-        if (!data.success || !data.challenge) throw new Error(data.error || 'Gagal memuat captcha');
-        window.__nkCaptchaId = data.challenge.id;
-        if (q) q.textContent = data.challenge.question;
+        if (!data.success) throw new Error(data.error || 'Gagal memuat tantangan');
+        window.__nkCaptchaId = data.challenge && data.challenge.id;
+        nkPowTicket = data.pow || null;
+        if (q && data.challenge) q.textContent = data.challenge.question;
+        if (status) {
+            status.textContent = nkPowTicket
+                ? `Keamanan aktif (PoW level ${nkPowTicket.difficulty}). Jawab soal lalu klik Lanjut.`
+                : 'Jawab soal di bawah, lalu klik Lanjut.';
+        }
+        // Turnstile widget if site key present
+        if (data.turnstileSiteKey && window.turnstile && document.getElementById('turnstileBox')) {
+            document.getElementById('turnstileBox').innerHTML = '';
+            window.turnstile.render('#turnstileBox', {
+                sitekey: data.turnstileSiteKey,
+                callback: (tok) => { window.__nkTurnstile = tok; }
+            });
+        }
         const input = document.getElementById('captchaAnswer');
         if (input) { input.value = ''; input.focus(); }
     } catch (e) {
-        if (q) q.textContent = 'Gagal memuat soal. Muat ulang halaman.';
+        if (q) q.textContent = 'Gagal memuat tantangan. Muat ulang halaman.';
         if (err) { err.hidden = false; err.textContent = e.message || 'Error'; }
     }
 }
@@ -71,24 +153,40 @@ async function loadCaptchaChallenge() {
 async function submitCaptcha(answer) {
     const err = document.getElementById('captchaError');
     const btn = document.getElementById('captchaSubmit');
+    const status = document.getElementById('captchaStatus');
     const input = document.getElementById('captchaAnswer');
     if (!window.__nkCaptchaId) {
-        if (err) { err.hidden = false; err.textContent = 'Soal belum siap. Tunggu sebentar.'; }
+        if (err) { err.hidden = false; err.textContent = 'Soal belum siap.'; }
         await loadCaptchaChallenge();
         return false;
     }
-    if (btn) { btn.disabled = true; btn.textContent = 'Memeriksa...'; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Memverifikasi…'; }
     try {
+        let powNonce = '';
+        if (nkPowTicket && nkPowTicket.salt) {
+            if (status) status.textContent = 'Menghitung Proof-of-Work… (jangan tutup tab)';
+            powNonce = await solvePow(nkPowTicket.salt, nkPowTicket.difficulty, () => {});
+        }
+        if (status) status.textContent = 'Mengirim verifikasi…';
+        const waitedMs = Date.now() - (nkChallengeStartedAt || Date.now());
         const res = await fetch(API_BASE + '/captcha/verify', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ id: window.__nkCaptchaId, answer: String(answer).trim() })
+            body: JSON.stringify({
+                id: window.__nkCaptchaId,
+                answer: String(answer).trim(),
+                powTicket: nkPowTicket && nkPowTicket.ticket,
+                powNonce,
+                fingerprint: nkFingerprint || collectFingerprint(),
+                turnstileToken: window.__nkTurnstile || '',
+                waitedMs
+            })
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.success || !data.token) {
             if (err) {
                 err.hidden = false;
-                err.textContent = data.error || 'Jawaban salah. Coba lagi.';
+                err.textContent = data.error || 'Verifikasi gagal. Coba lagi.';
             }
             if (input) input.value = '';
             await loadCaptchaChallenge();
@@ -103,7 +201,7 @@ async function submitCaptcha(answer) {
     } catch (e) {
         if (err) {
             err.hidden = false;
-            err.textContent = 'Koneksi gagal. Cek internet lalu coba lagi.';
+            err.textContent = e.message || 'Koneksi gagal. Coba lagi.';
         }
         return false;
     } finally {
@@ -121,7 +219,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
-
 
 const REQUEST_TIMEOUT_MS = 12000;
 let currentTab = 'all';
@@ -154,6 +251,8 @@ async function callAPI(endpoint, params = {}) {
         try {
             const headers = {};
             if (nkAccessToken) headers['X-NK-Token'] = nkAccessToken;
+            if (nkFingerprint) headers['X-FP'] = nkFingerprint;
+            headers['X-NK-Nonce'] = String(Date.now()) + '-' + Math.random().toString(16).slice(2);
             response = await fetch(url, { signal: controller.signal, headers });
             if (response.status === 403) {
                 try {
