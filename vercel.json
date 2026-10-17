@@ -5,11 +5,25 @@
       "src": "server.js",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["index.html", "style.css", "script.js", "subtitle.html", "subtitle.js", "lib/**"]
+        "includeFiles": [
+          "index.html",
+          "style.css",
+          "script.js",
+          "nk-features.js",
+          "subtitle.html",
+          "subtitle.js",
+          "manifest.webmanifest",
+          "sw.js",
+          "icon.svg",
+          "lib/**"
+        ]
       }
     }
   ],
   "routes": [
-    { "src": "/(.*)", "dest": "/server.js" }
+    {
+      "src": "/(.*)",
+      "dest": "/server.js"
+    }
   ]
 }

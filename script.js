@@ -60,26 +60,38 @@ async function loadCaptchaChallenge() {
         if (!data.success || !data.challenge) throw new Error(data.error || 'Gagal memuat captcha');
         window.__nkCaptchaId = data.challenge.id;
         if (q) q.textContent = data.challenge.question;
+        const input = document.getElementById('captchaAnswer');
+        if (input) { input.value = ''; input.focus(); }
     } catch (e) {
         if (q) q.textContent = 'Gagal memuat soal. Muat ulang halaman.';
+        if (err) { err.hidden = false; err.textContent = e.message || 'Error'; }
     }
 }
 
 async function submitCaptcha(answer) {
     const err = document.getElementById('captchaError');
+    const btn = document.getElementById('captchaSubmit');
+    const input = document.getElementById('captchaAnswer');
+    if (!window.__nkCaptchaId) {
+        if (err) { err.hidden = false; err.textContent = 'Soal belum siap. Tunggu sebentar.'; }
+        await loadCaptchaChallenge();
+        return false;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Memeriksa...'; }
     try {
         const res = await fetch(API_BASE + '/captcha/verify', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: window.__nkCaptchaId, answer })
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ id: window.__nkCaptchaId, answer: String(answer).trim() })
         });
-        const data = await res.json();
-        if (!data.success || !data.token) {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success || !data.token) {
             if (err) {
                 err.hidden = false;
-                err.textContent = data.error || 'Jawaban salah';
+                err.textContent = data.error || 'Jawaban salah. Coba lagi.';
             }
-            loadCaptchaChallenge();
+            if (input) input.value = '';
+            await loadCaptchaChallenge();
             return false;
         }
         nkAccessToken = data.token;
@@ -91,9 +103,11 @@ async function submitCaptcha(answer) {
     } catch (e) {
         if (err) {
             err.hidden = false;
-            err.textContent = 'Verifikasi gagal. Coba lagi.';
+            err.textContent = 'Koneksi gagal. Cek internet lalu coba lagi.';
         }
         return false;
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Lanjut'; }
     }
 }
 
